@@ -1,7 +1,17 @@
 
 import socket
+import time
+import sys
+import json
+import random
 import Queue
 import threading
+import SocketServer
+from litterstore import LitterStore
+
+MCAST_ADDR = "239.192.1.100"
+MCAST_PORT = 50000
+MYUID = 'thisismyuid'
 
 # Producer thread
 class MulticastServer(threading.Thread):
@@ -9,11 +19,11 @@ class MulticastServer(threading.Thread):
     def __init__(self, queue):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.sock = self.init_mcast()
+        self.sock = MulticastServer.init_mcast()
 
     # code from http://wiki.python.org/moin/UdpCommunication
-    def init_mcast(self, port=50000, addr="239.192.1.100"):
-
+    @staticmethod
+    def init_mcast(port=MCAST_PORT, addr=MCAST_ADDR):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -28,41 +38,47 @@ class MulticastServer(threading.Thread):
         s.bind(('', port))
 
         intf = socket.gethostbyname(socket.gethostname())
-        print intf
-
         s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, \
-            socket.inet_aton('10.128.80.91'))
+            socket.inet_aton('192.168.0.101'))
         s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
-            socket.inet_aton(addr) + socket.inet_aton('10.128.80.91'))
+            socket.inet_aton(addr) + socket.inet_aton('192.168.0.101'))
 
         return s
 
     def run(self):
         while True:
-            data, sender = self.sock.recvfrom(1024)
-            print data, sender
-            self.queue.put((data, sender, s))
+            data, addr = self.sock.recvfrom(1024)
+            self.queue.put((data, UDPSender(self.sock, addr)))
 
-
-class TCPHandler(SocketServer.StreamRequestHandler):
-
-    def __init__(self, queue):
-        SocketServer.StreamRequestHandler.__init__(self)
-        self.queue = queue
-
-    def handle(self):
-        data = self.rfile.read()
-        self.queue.put((data, self.client_address[0], self))
 
 # Producer thread
-class TCPServer(threading.Thread):
+class UnicastServer(threading.Thread):
 
     def __init__(self, queue):
         threading.Thread.__init__(self)
-        self.server = TCPHandler(queue)
+        self.queue = queue
+        self.sock = UnicastServer.init_ucast()
+
+    @staticmethod
+    def init_ucast(port=0, addr=''):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.bind((addr, port))
+        return s
 
     def run(self):
-        self.server.server_forever()
+        while True:
+            data, addr = self.sock.recvfrom(1024)
+            self.queue.put((data, UDPSender(self.sock, addr)))
+
+class UDPSender:
+
+    def __init__(self, sock, dest):
+        self.sock = sock
+        self.dest = dest
+
+    def send(self, data):
+        self.sock.sendto(data, self.dest)
+
 
 # Consumer thread
 class WorkerThread(threading.Thread):
@@ -70,81 +86,66 @@ class WorkerThread(threading.Thread):
     def __init__(self, queue):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.litter = Litter()
+        self.uid = MYUID
 
     def run(self):
+        # SQL database has to be created in same thread
+        self.litstore = LitterStore(self.uid)
         while True:
-            data, sender, con = self.queue.get()
-            print "wthread received %s from %s" % (data, sender)
+            data, sender = self.queue.get()
+            request = json.loads(data)
+            print 'request from %s >> %s' % (sender.dest, request)
+            response = self.litstore.process(**request)
 
-            req = json.loads(data)
-            method = request['m']
-
-            if(method == 'discover'):
-                resp = {'m' : 'discover-res', 'uid' : litter.uid}
-                con.sendto(json.dumps(resp), sender)
-
-            elif(method == 'discover-res'):
-                litter.update_follow(req['uid'])
-
-            elif(method == 'post'):
-                litter.post(req['mid'], req['uid'], req['time'], req['msg'])
-                resp = {'m' : 'post-ack', req['mid'], litter.uid}
-                con.sendto(json.dumps(resp), sender)
-
-            elif(method = 'post-ack'):
-                litter.post_ack(req['mid'], req['uid'])
-
-            elif(method = 'get'):
-                posts = litter.get(req['fids'], req['since'])
-                resp = {'m' : 'get-res', 'posts' : posts}
-                con.wfile.write(json.dumps(resp))
-
-            elif(method = 'get-res'):
-                litter.add_posts(req['posts'])
-
-            self.queue.task_done()
+            rthread = ResponseThread(response, sender, self.uid)
+            rthread.start()
 
 
-#TODO - needs implementation
-class Litter():
+class ResponseThread(threading.Thread):
 
-    def __init__(self):
-        # TODO - place holder, use big number
-        self.uid = socket.gethostname()
-        self.fids = []
+    def __init__(self, response, sender, uid):
+        threading.Thread.__init__(self)
+        self.response = response
+        self.sender = sender
 
-    def update_follow(self, uid):
-        return
+    def run(self):
+        for post in self.response:
+            data = json.dumps(post)
+            print 'reply to %s >> %s' % (self.sender.dest, data)
+            self.sender.send(data)
+            time.sleep(1)
 
-    def post(self, uid, time, msg):
-        return
 
-    def get(self, fids, since):
-        return []
+# TODO - better time range right now it requests everything
+def discover_msg(uid='uid', begin = 0, until = sys.maxint):
+    kwargs = {}
+    kwargs['uid'] = random.randint(0, sys.maxint)
+    kwargs['begin'] = begin
+    kwargs['until'] = until
+    request = { 'method' : 'discover', 'kwargs' : kwargs }
+    return request
 
-    def add_posts(posts):
-        return
-
-def main(port=50000, addr='239.192.1.100'):
+def main():
 
     queue = Queue.Queue()
 
     mserver = MulticastServer(queue)
     mserver.start()
 
+    userver = UnicastServer(queue)
+    userver.start()
+
     wthread = WorkerThread(queue)
     wthread.start()
 
-    tserver = TCPServer(queue)
-    tserver.start()
+    # heartbeat loop set for every 5 min
+    while True:
+        userver.sock.sendto(json.dumps(discover_msg()), (MCAST_ADDR, MCAST_PORT))
+        time.sleep(300)
 
-    #TODO - this will be the main IO thread
-
-    queue.join()
     mserver.join()
+    userver.join()
     wthread.join()
-
 
 if __name__ == '__main__':
     main()
