@@ -4,14 +4,40 @@ import time
 import sys
 import json
 import random
-import Queue
 import threading
-import SocketServer
+import urlparse
+import Queue
+import BaseHTTPServer
 from litterstore import LitterStore
 
 MCAST_ADDR = "239.192.1.100"
 MCAST_PORT = 50000
-MYUID = 'thisismyuid'
+
+# Sender classes
+class Sender:
+    dest = 'not assigned'
+
+    def send(self, data):
+        raise Exception("Base class, no implementation")
+
+class UDPSender(Sender):
+
+    def __init__(self, sock, dest):
+        self.sock = sock
+        self.dest = dest
+
+    def send(self, data):
+        self.sock.sendto(data, self.dest)
+
+
+class HTTPSender(Sender):
+
+    def __init__(self, queue):
+        self.queue = queue
+
+    def send(self, data):
+        self.queue.put(data)
+
 
 # Producer thread
 class MulticastServer(threading.Thread):
@@ -21,7 +47,6 @@ class MulticastServer(threading.Thread):
         self.queue = queue
         self.sock = MulticastServer.init_mcast()
 
-    # code from http://wiki.python.org/moin/UdpCommunication
     @staticmethod
     def init_mcast(port=MCAST_PORT, addr=MCAST_ADDR):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -39,9 +64,9 @@ class MulticastServer(threading.Thread):
 
         intf = socket.gethostbyname(socket.gethostname())
         s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, \
-            socket.inet_aton('192.168.0.101'))
+            socket.inet_aton(intf))
         s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
-            socket.inet_aton(addr) + socket.inet_aton('192.168.0.101'))
+            socket.inet_aton(addr) + socket.inet_aton(intf))
 
         return s
 
@@ -70,32 +95,62 @@ class UnicastServer(threading.Thread):
             data, addr = self.sock.recvfrom(1024)
             self.queue.put((data, UDPSender(self.sock, addr)))
 
-class UDPSender:
 
-    def __init__(self, sock, dest):
-        self.sock = sock
-        self.dest = dest
+class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
-    def send(self, data):
-        self.sock.sendto(data, self.dest)
+    def do_GET(self):
+        print 'doing get'
+        presults = urlparse.urlparse(self.path)
+        request = urlparse.parse_qs(presults[4])
+        self.process_request(request)
+
+    def do_POST(self):
+        print 'doing post'
+        clen = int(self.headers.get('Content-Length'))
+        request = urlparse.parse_qs(self.rfile.read(clen))
+        print "request %s " % request
+        self.process_request(request)
+
+    def process_request(self, request):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+
+        tmp_queue = Queue.Queue()
+        data = request['json'][0]
+        self.server.queue.put((data, HTTPSender(tmp_queue)))
+        self.wfile.write(tmp_queue.get())
+
+
+class HTTPThread(threading.Thread):
+
+    def __init__(self, queue):
+        threading.Thread.__init__(self)
+        self.http = BaseHTTPServer.HTTPServer(('', 8000), HTTPHandler)
+        self.http.queue = queue
+
+    def run(self):
+        self.http.serve_forever()
 
 
 # Consumer thread
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue):
+    def __init__(self, queue, uid):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.uid = MYUID
+        self.uid = uid
 
     def run(self):
         # SQL database has to be created in same thread
         self.litstore = LitterStore(self.uid)
         while True:
             data, sender = self.queue.get()
+            print data
             request = json.loads(data)
+
             print 'request from %s >> %s' % (sender.dest, request)
-            response = self.litstore.process(**request)
+            response = self.litstore.process(request)
 
             rthread = ResponseThread(response, sender, self.uid)
             rthread.start()
@@ -109,11 +164,16 @@ class ResponseThread(threading.Thread):
         self.sender = sender
 
     def run(self):
-        for post in self.response:
-            data = json.dumps(post)
-            print 'reply to %s >> %s' % (self.sender.dest, data)
+        print 'response = ', repr(self.response)
+        if isinstance(self.sender, HTTPSender):
+            data = json.dumps(self.response)
             self.sender.send(data)
-            time.sleep(1)
+        else:
+            for post in self.response:
+                data = json.dumps(post)
+                print 'reply to %s >> %s' % (self.sender.dest, data)
+                self.sender.send(data)
+                time.sleep(1)
 
 
 # TODO - better time range right now it requests everything
@@ -122,10 +182,12 @@ def discover_msg(uid='uid', begin = 0, until = sys.maxint):
     kwargs['uid'] = random.randint(0, sys.maxint)
     kwargs['begin'] = begin
     kwargs['until'] = until
-    request = { 'method' : 'discover', 'kwargs' : kwargs }
-    return request
+    kwargs['m'] = 'discover'
+    return kwargs
 
 def main():
+
+    uid = sys.argv[1]
 
     queue = Queue.Queue()
 
@@ -135,12 +197,16 @@ def main():
     userver = UnicastServer(queue)
     userver.start()
 
-    wthread = WorkerThread(queue)
+    httpd = HTTPThread(queue)
+    httpd.start()
+
+    wthread = WorkerThread(queue, uid)
     wthread.start()
 
     # heartbeat loop set for every 5 min
     while True:
-        userver.sock.sendto(json.dumps(discover_msg()), (MCAST_ADDR, MCAST_PORT))
+        userver.sock.sendto(json.dumps(discover_msg(uid)), \
+            (MCAST_ADDR, MCAST_PORT))
         time.sleep(300)
 
     mserver.join()

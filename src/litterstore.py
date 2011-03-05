@@ -59,22 +59,30 @@ class LitterStore:
   def close(self):
     self.con.close()
 
-  def process(self, method, kwargs):
-    results = []
+  def process(self, request):
+    results = ['request successful']
+    method = request['m']
+    del request['m']
 
     if (method == 'discover'):
-      for post in self.discover(**kwargs):
-        kwargs = {}
-        kwargs['uid'] = post[0]
-        kwargs['postid'] = post[1]
-        kwargs['tstamp'] = post[2]
-        kwargs['msg'] = post[3]
-        request = { 'method' : 'post', 'kwargs' : kwargs }
-        results.append(request)
+      results = self.process_results(self.discover(**request))
     elif (method == 'post'):
-      self.post(**kwargs)
+      self.post(**request)
     elif (method == 'get_posts'):
-      results = self.get_posts(**kwargs)
+      results = self.process_results(self.get_posts(**request))
+
+    return results
+
+  def process_results(self, response):
+    results = []
+    for post in response:
+      kwargs = {}
+      kwargs['uid'] = post[0]
+      kwargs['postid'] = post[1]
+      kwargs['tstamp'] = post[2]
+      kwargs['msg'] = post[3]
+      kwargs['m'] = 'post'
+      results.append(kwargs)
 
     return results
 
