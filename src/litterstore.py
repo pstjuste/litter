@@ -19,7 +19,8 @@ class LitterStore:
     self.uid = uid
     self.discovered = {}
     self._db_call("CREATE TABLE IF NOT EXISTS posts \
-        (uid TEXT, postid INTEGER, msg TEXT, time INTEGER)")
+        (uid TEXT, postid INTEGER, msg TEXT, time INTEGER, \
+        PRIMARY KEY(uid ASC, postid ASC))")
     cid = self._db_call("SELECT MAX(postid) FROM posts WHERE uid == ?", (uid, ))
     self.nextid = 0 if cid[0][0] == None else cid[0][0] + 1
 
@@ -51,7 +52,10 @@ class LitterStore:
   def discover(self, uid, begin, until):
     if uid in self.discovered:
       if self.discovered[uid] == begin:
-        return []
+        #TODO - temporary disable for testing purposes/ will fix later
+        #return []
+        pass
+
     self.discovered[uid] = begin
     return self._db_call("SELECT uid, postid, time, msg FROM posts \
         WHERE time > ? and time < ?", (begin, until))
@@ -60,7 +64,7 @@ class LitterStore:
     self.con.close()
 
   def process(self, request):
-    results = ['request successful']
+    results = []
     method = request['m']
     del request['m']
 
@@ -68,6 +72,7 @@ class LitterStore:
       results = self.process_results(self.discover(**request))
     elif (method == 'post'):
       self.post(**request)
+      results = ['post successful']
     elif (method == 'get_posts'):
       results = self.process_results(self.get_posts(**request))
 

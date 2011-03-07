@@ -1,10 +1,9 @@
 
 import socket, json, time, random, sys, hashlib, urllib
 
-def post_msg(uid, msg, tstamp = time.time()):
+def post_msg(uid, msg):
     kwargs = {}
     kwargs['uid'] = uid
-    kwargs['tstamp'] = tstamp
     kwargs['msg'] = msg
 
     #TODO - postid has to be string type in database
@@ -12,7 +11,6 @@ def post_msg(uid, msg, tstamp = time.time()):
     #shash.update(str(uid) + msg + str(tstamp))
     #kwargs['postid'] = int(shash.digest())
 
-    kwargs['postid'] = random.randint(0, sys.maxint)
     kwargs['m'] = 'post'
 
     return json.dumps(kwargs)
@@ -26,35 +24,27 @@ def get_msg(uid=None, begin = 0, until = sys.maxint):
 
     return json.dumps(kwargs)
 
-def http_main():
+def http_main(uid, msg):
 
-    uid = random.randint(0, sys.maxint)
-    msg = 'this is my tcp message, litter woohoo'
-    #params = urllib.urlencode({ 'json' : post_msg(uid, msg)})
-    params = urllib.urlencode({ 'json' : get_msg()})
+    if msg != "":
+        params = urllib.urlencode({ 'json' : post_msg(uid, msg)})
+    else:
+        params = urllib.urlencode({ 'json' : get_msg()})
 
-    print params
+    print 'sent params ', repr(params)
 
     f = urllib.urlopen("http://127.0.0.1:8000/", params)
 
-    print 'received ', f.read()
+    print 'received ', repr(f.read())
     
 
-def main(port=50000, addr='239.192.1.100'):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(('', 0))
+def main():
 
-    uid = random.randint(0, sys.maxint)
-    msg = "this is my message, litter all day and all night"
-
-    #s.sendto(post_msg(uid, msg), (addr, port))
-
-    s.sendto(get_msg(), (addr, port))
-
+    uid = socket.gethostname()
     while True:
-        data, addr = s.recvfrom(1024)
-        print "from %s data %s" % (addr, data)
+        msg = raw_input('Enter message: ')
+        http_main(uid, msg)
+
 
 if __name__ == '__main__':
-    http_main()
-    main(**{ 'addr' : '127.0.0.1'})
+    main()

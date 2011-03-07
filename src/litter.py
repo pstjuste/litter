@@ -1,5 +1,7 @@
 
 import socket
+import fcntl
+import struct
 import time
 import sys
 import json
@@ -13,12 +15,23 @@ from litterstore import LitterStore
 MCAST_ADDR = "239.192.1.100"
 MCAST_PORT = 50000
 
-# Sender classes
+# from http://code.activestate.com/recipes/439094-get-the-ip-address-associated-with-a-network-inter/
+def get_ip_address(ifname):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(fcntl.ioctl(
+        s.fileno(),
+        0x8915,  # SIOCGIFADDR
+        struct.pack('256s', ifname[:15])
+    )[20:24])
+
+
+# Sender base class
 class Sender:
     dest = 'not assigned'
 
     def send(self, data):
         raise Exception("Base class, no implementation")
+
 
 class UDPSender(Sender):
 
@@ -45,10 +58,11 @@ class MulticastServer(threading.Thread):
     def __init__(self, queue):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.sock = MulticastServer.init_mcast()
+        self.intf = get_ip_address(sys.argv[1])
+        self.sock = MulticastServer.init_mcast(self.intf)
 
     @staticmethod
-    def init_mcast(port=MCAST_PORT, addr=MCAST_ADDR):
+    def init_mcast(intf="127.0.0.1", port=MCAST_PORT, addr=MCAST_ADDR):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -62,7 +76,6 @@ class MulticastServer(threading.Thread):
 
         s.bind(('', port))
 
-        intf = socket.gethostbyname(socket.gethostname())
         s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, \
             socket.inet_aton(intf))
         s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
@@ -73,7 +86,10 @@ class MulticastServer(threading.Thread):
     def run(self):
         while True:
             data, addr = self.sock.recvfrom(1024)
-            self.queue.put((data, UDPSender(self.sock, addr)))
+            print "MulticastServer: sender ", repr(addr), data
+            # we ignore our own requests
+            if addr[0] != self.intf:
+                self.queue.put((data, UDPSender(self.sock, addr)))
 
 
 # Producer thread
@@ -93,25 +109,26 @@ class UnicastServer(threading.Thread):
     def run(self):
         while True:
             data, addr = self.sock.recvfrom(1024)
+            print "UnicastServer: sender ", repr(addr), data
             self.queue.put((data, UDPSender(self.sock, addr)))
 
 
 class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def do_GET(self):
-        print 'doing get'
+        print 'HTTPHandler: doing get'
         presults = urlparse.urlparse(self.path)
         request = urlparse.parse_qs(presults[4])
         self.process_request(request)
 
     def do_POST(self):
-        print 'doing post'
+        print 'HTTPHandler: doing post'
         clen = int(self.headers.get('Content-Length'))
         request = urlparse.parse_qs(self.rfile.read(clen))
-        print "request %s " % request
         self.process_request(request)
 
     def process_request(self, request):
+        print "HTTPHandler: %s " % request
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
@@ -146,14 +163,16 @@ class WorkerThread(threading.Thread):
         self.litstore = LitterStore(self.uid)
         while True:
             data, sender = self.queue.get()
-            print data
-            request = json.loads(data)
+            print 'WorkerThread: %s : %s' % (sender.dest, data)
 
-            print 'request from %s >> %s' % (sender.dest, request)
-            response = self.litstore.process(request)
-
-            rthread = ResponseThread(response, sender, self.uid)
-            rthread.start()
+            # need try catch cause crazy things can happen
+            try:
+                request = json.loads(data)
+                response = self.litstore.process(request)
+                rthread = ResponseThread(response, sender, self.uid)
+                rthread.start()
+            except Exception as ex:
+                print ex
 
 
 class ResponseThread(threading.Thread):
@@ -164,30 +183,50 @@ class ResponseThread(threading.Thread):
         self.sender = sender
 
     def run(self):
-        print 'response = ', repr(self.response)
+        print 'ResponseThread: ', repr(self.response)
+
+        # If HTTP send all at once, if UDP send one by one
+        # to avoid fragmentation, wait one second to minimize
+        # probability of packet loss due to congestion
         if isinstance(self.sender, HTTPSender):
             data = json.dumps(self.response)
             self.sender.send(data)
         else:
             for post in self.response:
                 data = json.dumps(post)
-                print 'reply to %s >> %s' % (self.sender.dest, data)
+                print 'ResponseThread: %s : %s' % (self.sender.dest, data)
                 self.sender.send(data)
                 time.sleep(1)
 
 
-# TODO - better time range right now it requests everything
-def discover_msg(uid='uid', begin = 0, until = sys.maxint):
+def build_msg(method, uid, begin = 0, until = sys.maxint):
     kwargs = {}
-    kwargs['uid'] = random.randint(0, sys.maxint)
+    kwargs['m'] = method
+    kwargs['uid'] = uid
     kwargs['begin'] = begin
     kwargs['until'] = until
-    kwargs['m'] = 'discover'
-    return kwargs
+    return json.dumps(kwargs)
+
+
+def heartbeat(queue, sender, uid, disc):
+    tstamp = time.time()
+    begin = int(tstamp - 30.0)
+    until = int(tstamp)
+
+    # this will push posts via multicast to peers every 30 seconds
+    # if new posts are available
+    data = build_msg('get_posts', uid, begin, until)
+    queue.put((data, sender))
+
+    # check to see if we need to send discovery request
+    if disc:
+        data = build_msg('discover', uid)
+        sender.send(data)
+
 
 def main():
 
-    uid = sys.argv[1]
+    uid = socket.gethostname()
 
     queue = Queue.Queue()
 
@@ -203,15 +242,19 @@ def main():
     wthread = WorkerThread(queue, uid)
     wthread.start()
 
-    # heartbeat loop set for every 5 min
+    counter = 0
     while True:
-        userver.sock.sendto(json.dumps(discover_msg(uid)), \
-            (MCAST_ADDR, MCAST_PORT))
-        time.sleep(300)
+        time.sleep(30)
+        addr = (MCAST_ADDR, MCAST_PORT)
+        disc = False
 
-    mserver.join()
-    userver.join()
-    wthread.join()
+        # send discover request every 5 minutes
+        if (counter % 10 == 0):
+            disc = True
+
+        heartbeat(queue, UDPSender(userver.sock, addr), uid, disc)
+        counter += 1
+
 
 if __name__ == '__main__':
     main()
