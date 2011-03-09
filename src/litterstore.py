@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """
 A very lightweight Litter (LAN + Twitter) implementation with absolutely no
 security mechanisms.  Messages are stored in a database and relationships are
@@ -40,6 +40,7 @@ class LitterStore:
       raise Exception("Invalid postid: " + str(postid))
     self._db_call("INSERT INTO posts (uid, postid, time, msg) VALUES (?, ?, ?, ?)", \
         (uid, postid, tstamp, msg))
+    return [(uid, postid, tstamp, msg)]
 
   def get_posts(self, uid = None, begin = 0, until = sys.maxint):
     msg = "SELECT uid, postid, time, msg FROM posts WHERE "
@@ -69,14 +70,13 @@ class LitterStore:
     del request['m']
 
     if (method == 'discover'):
-      results = self.process_results(self.discover(**request))
+      results = self.discover(**request)
     elif (method == 'post'):
-      self.post(**request)
-      results = ['post successful']
+      results = self.post(**request)
     elif (method == 'get_posts'):
-      results = self.process_results(self.get_posts(**request))
+      results = self.get_posts(**request)
 
-    return results
+    return self.process_results(results)
 
   def process_results(self, response):
     results = []

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 
 import socket, json, time, random, sys, hashlib, urllib
 

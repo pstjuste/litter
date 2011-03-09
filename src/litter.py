@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 
 import socket
 import fcntl
@@ -14,16 +15,6 @@ from litterstore import LitterStore
 
 MCAST_ADDR = "239.192.1.100"
 MCAST_PORT = 50000
-
-# from http://code.activestate.com/recipes/439094-get-the-ip-address-associated-with-a-network-inter/
-def get_ip_address(ifname):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    return socket.inet_ntoa(fcntl.ioctl(
-        s.fileno(),
-        0x8915,  # SIOCGIFADDR
-        struct.pack('256s', ifname[:15])
-    )[20:24])
-
 
 # Sender base class
 class Sender:
@@ -45,8 +36,9 @@ class UDPSender(Sender):
 
 class HTTPSender(Sender):
 
-    def __init__(self, queue):
+    def __init__(self, queue, dest):
         self.queue = queue
+        self.dest = dest
 
     def send(self, data):
         self.queue.put(data)
@@ -55,10 +47,11 @@ class HTTPSender(Sender):
 # Producer thread
 class MulticastServer(threading.Thread):
 
-    def __init__(self, queue):
+    def __init__(self, queue, intf, usock):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.intf = get_ip_address(sys.argv[1])
+        self.usock = usock
+        self.intf = intf
         self.sock = MulticastServer.init_mcast(self.intf)
 
     @staticmethod
@@ -89,16 +82,17 @@ class MulticastServer(threading.Thread):
             print "MulticastServer: sender ", repr(addr), data
             # we ignore our own requests
             if addr[0] != self.intf:
-                self.queue.put((data, UDPSender(self.sock, addr)))
+                self.queue.put((data, UDPSender(self.usock, addr)))
 
 
 # Producer thread
 class UnicastServer(threading.Thread):
 
-    def __init__(self, queue):
+    def __init__(self, queue, intf, usock):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.sock = UnicastServer.init_ucast()
+        self.intf = intf
+        self.sock = usock
 
     @staticmethod
     def init_ucast(port=0, addr=''):
@@ -110,19 +104,18 @@ class UnicastServer(threading.Thread):
         while True:
             data, addr = self.sock.recvfrom(1024)
             print "UnicastServer: sender ", repr(addr), data
-            self.queue.put((data, UDPSender(self.sock, addr)))
+            if addr[0] != self.intf:
+                self.queue.put((data, UDPSender(self.sock, addr)))
 
 
 class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def do_GET(self):
-        print 'HTTPHandler: doing get'
         presults = urlparse.urlparse(self.path)
         request = urlparse.parse_qs(presults[4])
         self.process_request(request)
 
     def do_POST(self):
-        print 'HTTPHandler: doing post'
         clen = int(self.headers.get('Content-Length'))
         request = urlparse.parse_qs(self.rfile.read(clen))
         self.process_request(request)
@@ -133,10 +126,10 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.send_header("Content-type", "text/plain")
         self.end_headers()
 
-        tmp_queue = Queue.Queue()
+        queue = Queue.Queue()
         data = request['json'][0]
-        self.server.queue.put((data, HTTPSender(tmp_queue)))
-        self.wfile.write(tmp_queue.get())
+        self.server.queue.put((data, HTTPSender(queue, self.client_address)))
+        self.wfile.write(queue.get())
 
 
 class HTTPThread(threading.Thread):
@@ -153,10 +146,11 @@ class HTTPThread(threading.Thread):
 # Consumer thread
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue, uid):
+    def __init__(self, queue, uid, usock):
         threading.Thread.__init__(self)
         self.queue = queue
         self.uid = uid
+        self.usock = usock
 
     def run(self):
         # SQL database has to be created in same thread
@@ -168,9 +162,27 @@ class WorkerThread(threading.Thread):
             # need try catch cause crazy things can happen
             try:
                 request = json.loads(data)
+
+                # save method locally before sending it litterstore
+                # just in case it gets modified
+                method = request['m']
                 response = self.litstore.process(request)
-                rthread = ResponseThread(response, sender, self.uid)
-                rthread.start()
+
+                if method == 'post' and isinstance(sender, HTTPSender):
+                    # if post from http it means this is a local post so
+                    # we neeed to broadcast to multicast
+                    addr = (MCAST_ADDR, MCAST_PORT)
+                    msender = UDPSender(self.usock, addr)
+                    mthread = ResponseThread(response, msender, self.uid)
+                    mthread.start()
+
+                    # also send reply back to HTTP path
+                    hthread = ResponseThread(response, sender, self.uid)
+                    hthread.start()
+                elif method != 'post':
+                    # we send response back through sender of request
+                    rthread = ResponseThread(response, sender, self.uid)
+                    rthread.start()
             except Exception as ex:
                 print ex
 
@@ -183,7 +195,7 @@ class ResponseThread(threading.Thread):
         self.sender = sender
 
     def run(self):
-        print 'ResponseThread: ', repr(self.response)
+        print 'ResponseThread: ', repr(self.sender.dest), repr(self.response)
 
         # If HTTP send all at once, if UDP send one by one
         # to avoid fragmentation, wait one second to minimize
@@ -199,6 +211,16 @@ class ResponseThread(threading.Thread):
                 time.sleep(1)
 
 
+# from http://code.activestate.com/recipes/439094-get-the-ip-address-associated-with-a-network-inter/
+def get_ip_address(ifname):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(fcntl.ioctl(
+        s.fileno(),
+        0x8915,  # SIOCGIFADDR
+        struct.pack('256s', ifname[:15])
+    )[20:24])
+
+
 def build_msg(method, uid, begin = 0, until = sys.maxint):
     kwargs = {}
     kwargs['m'] = method
@@ -208,52 +230,30 @@ def build_msg(method, uid, begin = 0, until = sys.maxint):
     return json.dumps(kwargs)
 
 
-def heartbeat(queue, sender, uid, disc):
-    tstamp = time.time()
-    begin = int(tstamp - 30.0)
-    until = int(tstamp)
-
-    # this will push posts via multicast to peers every 30 seconds
-    # if new posts are available
-    data = build_msg('get_posts', uid, begin, until)
-    queue.put((data, sender))
-
-    # check to see if we need to send discovery request
-    if disc:
-        data = build_msg('discover', uid)
-        sender.send(data)
-
-
 def main():
 
     uid = socket.gethostname()
-
+    intf = get_ip_address(sys.argv[1])
+    usock = UnicastServer.init_ucast()
     queue = Queue.Queue()
-
-    mserver = MulticastServer(queue)
-    mserver.start()
-
-    userver = UnicastServer(queue)
-    userver.start()
 
     httpd = HTTPThread(queue)
     httpd.start()
 
-    wthread = WorkerThread(queue, uid)
+    userver = UnicastServer(queue, intf, usock)
+    userver.start()
+
+    mserver = MulticastServer(queue, intf, usock)
+    mserver.start()
+
+    wthread = WorkerThread(queue, uid, usock)
     wthread.start()
 
-    counter = 0
     while True:
-        time.sleep(30)
         addr = (MCAST_ADDR, MCAST_PORT)
-        disc = False
-
-        # send discover request every 5 minutes
-        if (counter % 10 == 0):
-            disc = True
-
-        heartbeat(queue, UDPSender(userver.sock, addr), uid, disc)
-        counter += 1
+        data = build_msg('discover', uid)
+        usock.sendto(data, addr)
+        time.sleep(300)
 
 
 if __name__ == '__main__':
