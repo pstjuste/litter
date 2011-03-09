@@ -1,19 +1,12 @@
 #!/usr/bin/env python
 
-import socket, json, time, random, sys, hashlib, urllib
+import socket, json, time, random, sys, urllib
 
 def post_msg(uid, msg):
     kwargs = {}
     kwargs['uid'] = uid
     kwargs['msg'] = msg
-
-    #TODO - postid has to be string type in database
-    #shash = hashlib.sha1()
-    #shash.update(str(uid) + msg + str(tstamp))
-    #kwargs['postid'] = int(shash.digest())
-
     kwargs['m'] = 'post'
-
     return json.dumps(kwargs)
 
 def get_msg(uid=None, begin = 0, until = sys.maxint):
@@ -22,7 +15,6 @@ def get_msg(uid=None, begin = 0, until = sys.maxint):
     kwargs['begin'] = begin
     kwargs['until'] = until
     kwargs['m'] = 'get_posts'
-
     return json.dumps(kwargs)
 
 def http_main(uid, msg):

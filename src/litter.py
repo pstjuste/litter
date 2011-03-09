@@ -253,7 +253,7 @@ def main():
         addr = (MCAST_ADDR, MCAST_PORT)
         data = build_msg('discover', uid)
         usock.sendto(data, addr)
-        time.sleep(300)
+        time.sleep(30)
 
 
 if __name__ == '__main__':

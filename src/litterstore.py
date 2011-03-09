@@ -11,7 +11,7 @@ ignored.  A client can get posts via the "get_posts" method.
 Todo:  discover state should potentially be stored into the database, so we
 can ignore duplicate requests after a local Litter restart.
 """
-import unittest, sqlite3, time, sys, random
+import unittest, sqlite3, time, sys, random, hashlib
 
 class LitterStore:
   def __init__(self, uid, test = False):
@@ -19,8 +19,8 @@ class LitterStore:
     self.uid = uid
     self.discovered = {}
     self._db_call("CREATE TABLE IF NOT EXISTS posts \
-        (uid TEXT, postid INTEGER, msg TEXT, time INTEGER, \
-        PRIMARY KEY(uid ASC, postid ASC))")
+        (uid TEXT, postid INTEGER, msg TEXT, time INTEGER, hashid TEXT, \
+        PRIMARY KEY(hashid ASC))")
     cid = self._db_call("SELECT MAX(postid) FROM posts WHERE uid == ?", (uid, ))
     self.nextid = 0 if cid[0][0] == None else cid[0][0] + 1
 
@@ -32,18 +32,24 @@ class LitterStore:
     self.con.commit()
     return result
 
-  def post(self, uid, msg, tstamp = int(time.time()), postid = -1):
-    if uid == self.uid:
+  def _cal_hash(self, uid, msg, tstamp, postid):
+    hash = hashlib.sha1()
+    hash.update(str(uid) + msg + str(tstamp) + str(postid))
+    return hash.hexdigest()
+
+  def post(self, uid, msg, tstamp = int(time.time()), postid = -1, hashid=None):
+    if uid == self.uid and hashid == None:
       postid = self.nextid
+      hashid = self._cal_hash(uid, msg, tstamp, postid)
       self.nextid += 1
     if postid == -1:
       raise Exception("Invalid postid: " + str(postid))
-    self._db_call("INSERT INTO posts (uid, postid, time, msg) VALUES (?, ?, ?, ?)", \
-        (uid, postid, tstamp, msg))
-    return [(uid, postid, tstamp, msg)]
+    self._db_call("INSERT INTO posts (uid, postid, time, msg, hashid) \
+        VALUES (?, ?, ?, ?, ?)", (uid, postid, tstamp, msg, hashid))
+    return [(uid, postid, tstamp, msg, hashid)]
 
   def get_posts(self, uid = None, begin = 0, until = sys.maxint):
-    msg = "SELECT uid, postid, time, msg FROM posts WHERE "
+    msg = "SELECT uid, postid, time, msg, hashid FROM posts WHERE "
     if uid == None:
       msg = msg + "time > ? and time < ?", (begin, until)
     else:
@@ -58,7 +64,7 @@ class LitterStore:
         pass
 
     self.discovered[uid] = begin
-    return self._db_call("SELECT uid, postid, time, msg FROM posts \
+    return self._db_call("SELECT uid, postid, time, msg, hashid FROM posts \
         WHERE time > ? and time < ?", (begin, until))
 
   def close(self):
@@ -86,6 +92,7 @@ class LitterStore:
       kwargs['postid'] = post[1]
       kwargs['tstamp'] = post[2]
       kwargs['msg'] = post[3]
+      kwargs['hashid'] = post[4]
       kwargs['m'] = 'post'
       results.append(kwargs)
 
@@ -93,7 +100,7 @@ class LitterStore:
 
 class LitterUnit(unittest.TestCase):
   def test_post(self):
-    litter = Litter("David", test = True)
+    litter = LitterStore("David", test = True)
     litter.post("David", "Litter is working great!")
     self.assertEqual(1, len(litter.get_posts()))
     litter.post("David", "Litter is still working great!")
@@ -108,7 +115,7 @@ class LitterUnit(unittest.TestCase):
     litter.close()
 
   def test_discover(self):
-    litter = Litter("David", test = True)
+    litter = LitterStore("David", test = True)
     before = int(time.time()) - 1
     self.assertEqual(len(litter.discover("Bob", 0, sys.maxint)), 0)
     litter.post("David", "Litter is working great!")
@@ -119,12 +126,12 @@ class LitterUnit(unittest.TestCase):
     self.assertEqual(len(litter.discover("Bob", now, sys.maxint)), 0)
 
   def test_rpc(self):
-    litter = Litter("David", test = True)
+    litter = LitterStore("David", test = True)
     before = int(time.time()) - 1
     after = int(time.time()) + 1
     litter.post(**{"uid" : "David", "msg" : "Litter is working great!"})
     litter.post(**{"uid" : "David", "msg" : "Litter is still working great!"})
-    litter.post(**{"uid" : "Alice", "postid" : 2, "time" : before - 1, "msg" : "Hmm!"})
+    litter.post(**{"uid" : "Alice", "postid" : 2, "tstamp" : before - 1, "msg" : "Hmm!"})
     self.assertEqual(len(litter.discover(**{"uid" : "Bob", "begin" : before, "until" : sys.maxint})), 2)
     self.assertEqual(len(litter.discover(**{"uid" : "Bob", "begin" : before, "until" : sys.maxint})), 0)
     self.assertEqual(len(litter.discover(**{"uid" : "Bob", "begin" : after, "until" : sys.maxint})), 0)
