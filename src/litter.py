@@ -111,25 +111,58 @@ class UnicastServer(threading.Thread):
 class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def do_GET(self):
-        presults = urlparse.urlparse(self.path)
-        request = urlparse.parse_qs(presults[4])
-        self.process_request(request)
+        if self.path.startswith('/api'):
+            presults = urlparse.urlparse(self.path)
+            request = urlparse.parse_qs(presults[4])
+            self.process_request(request)
+        else:
+            self.process_file(self.path)
 
     def do_POST(self):
-        clen = int(self.headers.get('Content-Length'))
-        request = urlparse.parse_qs(self.rfile.read(clen))
-        self.process_request(request)
+        if self.path.startswith('/api'):
+            presults = urlparse.urlparse(self.path)
+            clen = int(self.headers.get('Content-Length'))
+            request = urlparse.parse_qs(self.rfile.read(clen))
+            self.process_request(request)
+        else:
+            self.process_file(self.path)
 
     def process_request(self, request):
         print "HTTPHandler: %s " % request
         self.send_response(200)
-        self.send_header("Content-type", "text/plain")
+        self.send_header("Content-type", "text/x-json")
         self.end_headers()
 
         queue = Queue.Queue()
         data = request['json'][0]
         self.server.queue.put((data, HTTPSender(queue, self.client_address)))
         self.wfile.write(queue.get())
+
+    def process_file(self, path):
+        if path == "/litter.css":
+            self.send_file("web/litter.css", "text/css")
+        elif path == "/litter.js":
+            self.send_file("web/litter.js", "text/javascript")
+        elif path == "/litter.html":
+            self.send_file("web/litter.html", "text/html")
+        elif path == "/jquery.js":
+            self.send_file("web/jquery.js", "text/javascript")
+        elif path == "jquery-ui.js":
+            self.send_file("web/jquery-ui.js", "text/javascript")
+        elif path == "/jquery-ui.css":
+            self.send_file("web/jquery-ui.css", "text/css")
+
+    def send_file(self, path, ctype):
+        try:
+            f = open(path)
+            data = f.read()
+            f.close()
+            self.send_response(200)
+            self.send_header("Content-type", ctype)
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as ex:
+            print ex
 
 
 class HTTPThread(threading.Thread):

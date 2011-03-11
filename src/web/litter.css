@@ -1,0 +1,155 @@
+body {
+  font-family: arial, sans-serif;
+  font-size: 12px;
+  margin: 0px;
+  padding: 0px;
+}
+
+#header {
+  width: 100%;
+  background-color: #3B5998;
+}
+
+#subheader {
+  padding: 5px;
+  width: 700px;
+  color: white;
+  margin: auto;
+}
+
+#subheader h1 {
+  font-size: 16px;
+  font-weight: bold;
+  float: left;
+  margin: 5px;
+}
+
+#subheader ul {
+  text-align: right;
+  font-weight: bold;
+  margin: 5px;
+}
+
+#subheader li {
+  display: inline;
+  padding: 0px 10px 0px 10px;
+  cursor: pointer;
+}
+
+#subheader li:hover {
+  text-decoration: underline;
+}
+
+#maindiv {
+  width: 800px;
+  margin: auto;
+}
+
+#inputdiv {
+  margin: auto;
+  width: 80%;
+}
+
+#inputdiv .input {
+  margin: 10px 0px 10px 0px;
+  padding: 5px;
+  border: 1px dashed #CCCCCC;
+  width: 98%;
+  font-size: 18px;
+  height: 20px;
+}
+
+#resultsdiv {
+  width: auto;
+  margin: auto;
+  padding: 0px 5px 5px 5px;
+  float: left;
+}
+
+#resultsdiv table {
+  width: 100%;
+  margin: 0px;
+  padding: 0px;
+  font-size: 12px;
+  color: #333333;
+}
+
+#resultsdiv td {
+  padding: 7px;
+  border-bottom: 1px dashed #CCCCCC;
+}
+
+#sidediv {
+  float: left;
+  border-right: 1px solid #CCCCCC;
+  padding: 5px;
+  width: 200px;
+  margin: auto;
+}
+
+#sidediv table {
+  margin: 0px;
+  padding: 0px;
+}
+
+#sidediv tr {
+  margin: 2px;
+  padding: 2px;
+}
+
+#sidediv td {
+  margin: 2px;
+  padding: 2px;
+  font-size: 12px;
+  color: #3B5998;
+}
+
+#searchdiv {
+  width: 700px;
+  padding: 10px;
+  margin: auto;
+  text-align: center;
+}
+
+#searchdiv input {
+  margin: 10px 0px 10px 0px;
+  padding: 5px;
+  border: 1px solid #CCCCCC;
+  width: 600px;
+  font-size: 18px;
+  height: 30px;
+}
+
+#searchdiv button {
+  padding: 10px;
+  margin: 5px;
+}
+
+.rating {
+  font-size: 24px;
+  color: #3B5998;
+  font-weight: bold;
+}
+
+.table_title {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.name {
+  font-size: 16px;
+  font-weight: bold;
+  color: #3B5998;
+  margin: 0px 0px 5px 0px;
+  cursor: pointer;
+}
+
+.info {
+  font-size: 12px;
+  margin: 0px 0px 2px 0px;
+}
+
+img {
+  padding: 2px;
+  border: 1px solid #CCCCCC;
+}

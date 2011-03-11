@@ -7,7 +7,9 @@ def post_msg(uid, msg):
     kwargs['uid'] = uid
     kwargs['msg'] = msg
     kwargs['m'] = 'post'
-    return json.dumps(kwargs)
+    result =  json.dumps(kwargs)
+    print result
+    return result
 
 def get_msg(uid=None, begin = 0, until = sys.maxint):
     kwargs = {}
@@ -15,7 +17,9 @@ def get_msg(uid=None, begin = 0, until = sys.maxint):
     kwargs['begin'] = begin
     kwargs['until'] = until
     kwargs['m'] = 'get_posts'
-    return json.dumps(kwargs)
+    result = json.dumps(kwargs)
+    print result
+    return result
 
 def http_main(uid, msg):
 
@@ -26,7 +30,7 @@ def http_main(uid, msg):
 
     print 'sent params ', repr(params)
 
-    f = urllib.urlopen("http://127.0.0.1:8000/", params)
+    f = urllib.urlopen("http://127.0.0.1:8000/api", params)
 
     print 'received ', repr(f.read())
     
