@@ -82,16 +82,13 @@ class MulticastServer(threading.Thread):
 
         s.bind(('', port))
 
-        intf2 = MulticastServer.get_ip_address('tapipop')
+        print intf
 
         s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, \
-            socket.inet_aton(intf) + socket.inet_aton(intf2))
+            socket.inet_aton(intf))
 
         s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
             socket.inet_aton(addr) + socket.inet_aton(intf))
-
-        s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
-            socket.inet_aton(addr) + socket.inet_aton(intf2))
 
         return s
 
@@ -275,7 +272,7 @@ def build_msg(method, uid, begin = 0, until = sys.maxint):
 def main():
 
     uid = socket.gethostname()
-    intf = MulticastServer.get_ip_address(sys.argv[1])
+    intf = MulticastServer.get_ip_address('tapipop')
 
     # returns a UDP socket that is shared by multiple threads for sending
     # I'm not sure if sockets are thread safe
