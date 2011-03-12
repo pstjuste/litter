@@ -47,7 +47,11 @@ class LitterStore:
     # once so time would not get updated if set as default variable
     if tstamp == None:
       tstamp = int(time.time())
-
+    if None != hashid:
+      if hashid != self._cal_hash(uid, msg, tstamp, postid):
+        raise Exception("hashid doesn't match:" + \
+                        " uid: %s msg: %s time: %s postid: %s badhash: %s" \
+                        % (uid, msg, tstamp, postid, hashid))
     if uid == self.uid and hashid == None:
       postid = self.nextid
       hashid = self._cal_hash(uid, msg, tstamp, postid)
