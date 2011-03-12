@@ -155,12 +155,12 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.wfile.write(queue.get())
 
     def process_file(self, path):
-        if path == "/litter.css":
+        if path == "/":
+            self.send_file("web/litter.html", "text/html")
+        elif path == "/litter.css":
             self.send_file("web/litter.css", "text/css")
         elif path == "/litter.js":
             self.send_file("web/litter.js", "text/javascript")
-        elif path == "/litter.html":
-            self.send_file("web/litter.html", "text/html")
         elif path == "/jquery.js":
             self.send_file("web/jquery.js", "text/javascript")
         elif path == "jquery-ui.js":
@@ -292,11 +292,15 @@ def main():
     wthread = WorkerThread(queue, uid, usock)
     wthread.start()
 
+    # wait a few seconds for threads to setup before sending first multicast
+    time.sleep(5)
+
+    addr = (MCAST_ADDR, MCAST_PORT)
     while True:
-        addr = (MCAST_ADDR, MCAST_PORT)
+        # TODO - provide a more realistic time interval
         data = build_msg('discover', uid)
         usock.sendto(data, addr)
-        time.sleep(30)
+        time.sleep(300)
 
 
 if __name__ == '__main__':
