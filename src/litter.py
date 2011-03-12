@@ -54,6 +54,17 @@ class MulticastServer(threading.Thread):
         self.intf = intf
         self.sock = MulticastServer.init_mcast(self.intf)
 
+    # from http://code.activestate.com/recipes/439094-get-the-ip-address-
+    # associated-with-a-network-inter/
+    @staticmethod
+    def get_ip_address(ifname):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        return socket.inet_ntoa(fcntl.ioctl(
+            s.fileno(),
+            0x8915,  # SIOCGIFADDR
+            struct.pack('256s', ifname[:15])
+            )[20:24])
+
     @staticmethod
     def init_mcast(intf="127.0.0.1", port=MCAST_PORT, addr=MCAST_ADDR):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -65,14 +76,22 @@ class MulticastServer(threading.Thread):
             pass
 
         s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_TTL, 20)
-        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_LOOP, 1)
+
+        # we dont really need multicast on loopback for now
+        #s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_LOOP, 1)
 
         s.bind(('', port))
 
+        intf2 = MulticastServer.get_ip_address('tapipop')
+
         s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, \
-            socket.inet_aton(intf))
+            socket.inet_aton(intf) + socket.inet_aton(intf2))
+
         s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
             socket.inet_aton(addr) + socket.inet_aton(intf))
+
+        s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
+            socket.inet_aton(addr) + socket.inet_aton(intf2))
 
         return s
 
@@ -244,16 +263,6 @@ class ResponseThread(threading.Thread):
                 time.sleep(1)
 
 
-# from http://code.activestate.com/recipes/439094-get-the-ip-address-associated-with-a-network-inter/
-def get_ip_address(ifname):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    return socket.inet_ntoa(fcntl.ioctl(
-        s.fileno(),
-        0x8915,  # SIOCGIFADDR
-        struct.pack('256s', ifname[:15])
-    )[20:24])
-
-
 def build_msg(method, uid, begin = 0, until = sys.maxint):
     kwargs = {}
     kwargs['m'] = method
@@ -266,7 +275,11 @@ def build_msg(method, uid, begin = 0, until = sys.maxint):
 def main():
 
     uid = socket.gethostname()
-    intf = get_ip_address(sys.argv[1])
+    intf = MulticastServer.get_ip_address(sys.argv[1])
+
+    # returns a UDP socket that is shared by multiple threads for sending
+    # I'm not sure if sockets are thread safe
+    # I am assuming that they are, NEED TO CHECK THAT
     usock = UnicastServer.init_ucast()
     queue = Queue.Queue()
 

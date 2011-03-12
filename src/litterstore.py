@@ -37,7 +37,17 @@ class LitterStore:
     hash.update(str(uid) + msg + str(tstamp) + str(postid))
     return hash.hexdigest()
 
-  def post(self, uid, msg, tstamp = int(time.time()), postid = -1, hashid=None):
+  def post(self, msg, uid=None, tstamp = None, postid = -1, hashid=None):
+    # uid has to be set here because default variable does not recognize
+    # self because it's runtime state
+    if uid == None:
+      uid = self.uid
+
+    # we have to assign here, because default variables are only called
+    # once so time would not get updated if set as default variable
+    if tstamp == None:
+      tstamp = int(time.time())
+
     if uid == self.uid and hashid == None:
       postid = self.nextid
       hashid = self._cal_hash(uid, msg, tstamp, postid)
@@ -51,9 +61,11 @@ class LitterStore:
   def get_posts(self, uid = None, begin = 0, until = sys.maxint):
     msg = "SELECT uid, postid, time, msg, hashid FROM posts WHERE "
     if uid == None:
-      msg = msg + "time > ? and time < ?", (begin, until)
+      msg = msg + "time > ? and time < ? ORDER BY time DESC", (begin, until)
     else:
-      msg = msg + "uid == ? and time > ? and time < ?", (uid, begin, until)
+      msg = msg + "uid == ? and time > ? and time < ? ORDER BY time DESC", \
+        (uid, begin, until)
+
     return self._db_call(msg[0], msg[1])
 
   def discover(self, uid, begin, until):

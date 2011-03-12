@@ -20,19 +20,15 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-var prevState = "";
-var gquery = "";
-var del = "";
-
 $(document).ready(init);
 
 function init() {
   document.title = "Litter - Twitter for the LAN";
   loadPage();
   loadHeader();
-  loadSearch();
+  loadPost();
   getState();
-  //window.setInterval(getState, 15000);
+  window.setInterval(getState, 15000);
 }
 
 function loadPage() {
@@ -40,7 +36,7 @@ function loadPage() {
   $("<div/>", {'id' : 'header'}).appendTo("#wrapper");
   $("<div/>", {'id' : 'subheader'}).appendTo("#header");
   $("<div/>", {'id' : 'maindiv'}).appendTo("#wrapper");
-  $("<div/>", {'id' : 'searchdiv'}).appendTo("#maindiv");
+  $("<div/>", {'id' : 'postdiv'}).appendTo("#maindiv");
   $("<div/>", {'id' : 'inputdiv'}).appendTo("#maindiv");
   $("<div/>", {'id' : 'resultsdiv'}).appendTo("#maindiv");
 }
@@ -48,16 +44,16 @@ function loadPage() {
 function loadHeader() {
   $("<h1/>", {text : 'Litter - Twitter for the LAN'}).appendTo("#subheader");
   var menu = $("<ul/>").appendTo("#subheader");
-  menu.append($("<li/>", {text : 'Refresh', click : doNothing}));
+  menu.append($("<li/>", {text : 'Refresh', click : getState}));
 }
 
 function doNothing() {}
 
-function loadSearch() {
-  $("<input/>", {"name" : "search"}).appendTo("#searchdiv");
+function loadPost() {
+  $("<input/>", {"name" : "post"}).appendTo("#postdiv");
 
   var msg = "Post";
-  $("<button/>", {text : msg, click : doSearch}).appendTo("#searchdiv");
+  $("<button/>", {text : msg, click : doPost}).appendTo("#postdiv");
 
 }
 
@@ -119,12 +115,12 @@ function getState() {
 }
 
 
-function doSearch() {
-  var method = "sdns.search";
-  var query = encodeURIComponent($(":input[name=search]").val());
-  gquery = query;
-  $.ajax({type: "POST", url: "state.xml", data : "m=" + method + 
-    "&q=" + query, success: loadResults});
+function doPost() {
+  var msg = encodeURIComponent($(":input[name=post]").val());
+  $(":input[name=post]").val('');
+  $.ajax({type: "POST", url: "/api", dataType: 'json', 
+    data : "json={\"m\": \"post\", \"msg\": \"" + msg + "\"}",
+    success: getState});
   clearInput();
 }
 

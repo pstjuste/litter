@@ -104,14 +104,14 @@ body {
   color: #3B5998;
 }
 
-#searchdiv {
+#postdiv {
   width: 700px;
   padding: 10px;
   margin: auto;
   text-align: center;
 }
 
-#searchdiv input {
+#postdiv input {
   margin: 10px 0px 10px 0px;
   padding: 5px;
   border: 1px solid #CCCCCC;
@@ -120,7 +120,7 @@ body {
   height: 30px;
 }
 
-#searchdiv button {
+#postdiv button {
   padding: 10px;
   margin: 5px;
 }
