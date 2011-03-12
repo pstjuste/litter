@@ -127,21 +127,27 @@ class UnicastServer(threading.Thread):
 class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def do_GET(self):
-        if self.path.startswith('/api'):
-            presults = urlparse.urlparse(self.path)
-            request = urlparse.parse_qs(presults[4])
-            self.process_request(request)
-        else:
-            self.process_file(self.path)
+        try:
+            if self.path.startswith('/api'):
+                presults = urlparse.urlparse(self.path)
+                request = urlparse.parse_qs(presults[4])
+                self.process_request(request)
+            else:
+                self.process_file(self.path)
+        except Exception as ex:
+            print ex
 
     def do_POST(self):
-        if self.path.startswith('/api'):
-            presults = urlparse.urlparse(self.path)
-            clen = int(self.headers.get('Content-Length'))
-            request = urlparse.parse_qs(self.rfile.read(clen))
-            self.process_request(request)
-        else:
-            self.process_file(self.path)
+        try:
+            if self.path.startswith('/api'):
+                presults = urlparse.urlparse(self.path)
+                clen = int(self.headers.get('Content-Length'))
+                request = urlparse.parse_qs(self.rfile.read(clen))
+                self.process_request(request)
+            else:
+                self.process_file(self.path)
+        except Exception as ex:
+            print ex
 
     def process_request(self, request):
         print "HTTPHandler: %s " % request
@@ -185,7 +191,7 @@ class HTTPThread(threading.Thread):
 
     def __init__(self, queue):
         threading.Thread.__init__(self)
-        self.http = BaseHTTPServer.HTTPServer(('', 8000), HTTPHandler)
+        self.http = BaseHTTPServer.HTTPServer(('127.0.0.1', 8000), HTTPHandler)
         self.http.queue = queue
 
     def run(self):
