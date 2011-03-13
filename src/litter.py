@@ -11,10 +11,14 @@ import threading
 import urlparse
 import Queue
 import BaseHTTPServer
-from litterstore import LitterStore
+import logging
+from litterstore import LitterStore, StoreError
 
 MCAST_ADDR = "239.192.1.100"
 MCAST_PORT = 50000
+
+# Log everything, and send it to stderr.
+logging.basicConfig(level=logging.DEBUG)
 
 # Sender base class
 class Sender:
@@ -139,7 +143,7 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 self.process_file(self.path)
         except Exception as ex:
             self.send_error(400, str(ex))
-            print ex
+            logging.exception(ex)
 
     def do_POST(self):
         try:
@@ -152,7 +156,7 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 self.process_file(self.path)
         except Exception as ex:
             self.send_error(400, str(ex))
-            print ex
+            logging.exception(ex);
 
     def process_request(self, request):
         print "HTTPHandler: %s " % request
@@ -165,9 +169,9 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
           self.send_error(500, str(err))
         else:
           self.send_response(200)
-          self.send_header("Content-type", "text/x-json")
+          self.send_header("Content-type", "text/x-json; charset=utf-8")
           self.end_headers()
-          self.wfile.write(data)
+          self.wfile.write(data.encode("utf-8"))
 
     def process_file(self, path):
         if path == "/":
@@ -195,7 +199,7 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         except Exception as ex:
-            print ex
+            logging.exception(ex)
 
 
 class HTTPThread(threading.Thread):
@@ -223,6 +227,7 @@ class WorkerThread(threading.Thread):
         self.litstore = LitterStore(self.uid)
         while True:
             data, sender = self.queue.get()
+            data = unicode(data, "utf-8")
             print 'WorkerThread: %s : %s' % (sender.dest, data)
 
             # need try catch cause crazy things can happen
@@ -249,11 +254,18 @@ class WorkerThread(threading.Thread):
                     # we send response back through sender of request
                     rthread = ResponseThread(response, sender, self.uid)
                     rthread.start()
+            except StoreError as ie:
+                if str(ie) == "column hashid is not unique":
+                  #this means we got a duplicate, no need to log:
+                  pass
+                else:
+                    if isinstance(sender, HTTPSender):
+                        sender.send_error(ex)
+                    logging.exception(ie)
             except Exception as ex:
                 if isinstance(sender, HTTPSender):
                   sender.send_error(ex)
-                print ex
-
+                logging.exception(ex)
 
 class ResponseThread(threading.Thread):
 
@@ -263,17 +275,17 @@ class ResponseThread(threading.Thread):
         self.sender = sender
 
     def run(self):
-        print 'ResponseThread: ', repr(self.sender.dest), repr(self.response)
+        print 'ResponseThread: ', repr(self.sender.dest) #, repr(self.response)
 
         # If HTTP send all at once, if UDP send one by one
         # to avoid fragmentation, wait one second to minimize
         # probability of packet loss due to congestion
         if isinstance(self.sender, HTTPSender):
-            data = json.dumps(self.response)
+            data = json.dumps(self.response, ensure_ascii=False)
             self.sender.send(data)
         else:
             for post in self.response:
-                data = json.dumps(post)
+                data = json.dumps(post, ensure_ascii=False)
                 print 'ResponseThread: %s : %s' % (self.sender.dest, data)
                 self.sender.send(data)
                 time.sleep(1)
@@ -285,7 +297,7 @@ def build_msg(method, uid, begin = 0, until = sys.maxint):
     kwargs['uid'] = uid
     kwargs['begin'] = begin
     kwargs['until'] = until
-    return json.dumps(kwargs)
+    return json.dumps(kwargs, ensure_ascii=False)
 
 
 def main():

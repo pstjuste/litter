@@ -13,6 +13,9 @@ can ignore duplicate requests after a local Litter restart.
 """
 import unittest, sqlite3, time, sys, random, hashlib
 
+class StoreError(Exception):
+    pass
+
 class LitterStore:
   def __init__(self, uid, test = False):
     self.con = sqlite3.connect(":memory:" if test else uid + ".db")
@@ -34,7 +37,11 @@ class LitterStore:
 
   def _cal_hash(self, uid, msg, tstamp, postid):
     hash = hashlib.sha1()
-    hash.update(str(uid) + msg + str(tstamp) + str(postid))
+    tohash = str(uid) + msg + str(tstamp) + str(postid)
+    #tohash is potentially unicode, if msg is, so we need to convert
+    #back to bytes, to do this, we use utf-8:
+    tohash = tohash.encode('utf-8')
+    hash.update(tohash)
     return hash.hexdigest()
 
   def post(self, msg, uid=None, tstamp = None, postid = -1, hashid=None):
@@ -58,8 +65,11 @@ class LitterStore:
       self.nextid += 1
     if postid == -1:
       raise Exception("Invalid postid: " + str(postid))
-    self._db_call("INSERT INTO posts (uid, postid, time, msg, hashid) \
-        VALUES (?, ?, ?, ?, ?)", (uid, postid, tstamp, msg, hashid))
+    try:
+      self._db_call("INSERT INTO posts (uid, postid, time, msg, hashid) \
+          VALUES (?, ?, ?, ?, ?)", (uid, postid, tstamp, msg, hashid))
+    except sqlite3.IntegrityError as ie:
+      raise StoreError(str(ie))    
     return [(uid, postid, tstamp, msg, hashid)]
 
   def get_posts(self, uid = None, begin = 0, until = sys.maxint):
