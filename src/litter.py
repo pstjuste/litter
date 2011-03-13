@@ -41,7 +41,10 @@ class HTTPSender(Sender):
         self.dest = dest
 
     def send(self, data):
-        self.queue.put(data)
+        self.queue.put((None, data))
+
+    def send_error(self, excep):
+        self.queue.put((excep, None))
 
 
 # Producer thread
@@ -135,6 +138,7 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             else:
                 self.process_file(self.path)
         except Exception as ex:
+            self.send_error(400, str(ex))
             print ex
 
     def do_POST(self):
@@ -147,18 +151,23 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             else:
                 self.process_file(self.path)
         except Exception as ex:
+            self.send_error(400, str(ex))
             print ex
 
     def process_request(self, request):
         print "HTTPHandler: %s " % request
-        self.send_response(200)
-        self.send_header("Content-type", "text/x-json")
-        self.end_headers()
-
-        queue = Queue.Queue()
         data = request['json'][0]
+        queue = Queue.Queue()
         self.server.queue.put((data, HTTPSender(queue, self.client_address)))
-        self.wfile.write(queue.get())
+        (err, data) = queue.get()
+        if err:
+          #Exception happened, TODO do something better here:
+          self.send_error(500, str(err))
+        else:
+          self.send_response(200)
+          self.send_header("Content-type", "text/x-json")
+          self.end_headers()
+          self.wfile.write(data)
 
     def process_file(self, path):
         if path == "/":
@@ -241,6 +250,8 @@ class WorkerThread(threading.Thread):
                     rthread = ResponseThread(response, sender, self.uid)
                     rthread.start()
             except Exception as ex:
+                if isinstance(sender, HTTPSender):
+                  sender.send_error(ex)
                 print ex
 
 
