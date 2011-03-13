@@ -1,2 +1,6 @@
-Litter stands for LAN Twitter when combined with a P2P VPN, it 
-provides functionality similar to distributed twitter ideas.
+Litter is for LAN Microblogging.  When combined with a P2P VPN, such as
+http://socialvpn.org , it can be used as a distributed status-sharing
+microblog service.
+
+This does not depend on SocialVPN (but works great with it!).  It does depend
+on multicast support.

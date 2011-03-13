@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-A very lightweight Litter (LAN + Twitter) implementation with absolutely no
+A very lightweight Litter (LAN + microblog) implementation with absolutely no
 security mechanisms.  Messages are stored in a database and relationships are
 stored in a in process data structure.  Incoming posts from both remote servers
 and local clients are sent to the "post" method.  A remote Litter serve can

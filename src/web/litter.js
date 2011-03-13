@@ -23,7 +23,7 @@ THE SOFTWARE.
 $(document).ready(init);
 
 function init() {
-  document.title = "Litter - Twitter for the LAN";
+  document.title = "Litter - Microblogging for the LAN";
   loadPage();
   loadHeader();
   loadPost();
@@ -42,7 +42,7 @@ function loadPage() {
 }
 
 function loadHeader() {
-  $("<h1/>", {text : 'Litter - Twitter for the LAN'}).appendTo("#subheader");
+  $("<h1/>", {text : 'Litter - Microblog for the LAN'}).appendTo("#subheader");
   var menu = $("<ul/>").appendTo("#subheader");
   menu.append($("<li/>", {text : 'Refresh', click : getState}));
 }
