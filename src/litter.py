@@ -169,10 +169,12 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.send_file("web/litter.js", "text/javascript")
         elif path == "/jquery.js":
             self.send_file("web/jquery.js", "text/javascript")
-        elif path == "jquery-ui.js":
+        elif path == "/jquery-ui.js":
             self.send_file("web/jquery-ui.js", "text/javascript")
         elif path == "/jquery-ui.css":
             self.send_file("web/jquery-ui.css", "text/css")
+        elif path == "/json2.js":
+            self.send_file("web/json2.js", "text/javascript")
 
     def send_file(self, path, ctype):
         try:

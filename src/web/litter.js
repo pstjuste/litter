@@ -116,11 +116,12 @@ function getState() {
 
 
 function doPost() {
-  var msg = encodeURIComponent($(":input[name=post]").val());
+  var msg = $(":input[name=post]").val();
+  var ob = { "m" : "post", "msg" : msg };
   $(":input[name=post]").val('');
   $.ajax({type: "POST", url: "/api", dataType: 'json', 
-    data : "json={\"m\": \"post\", \"msg\": \"" + msg + "\"}",
-    success: getState});
+          data : {'json' : JSON.stringify(ob)} ,
+          success: getState});
   clearInput();
 }
 
