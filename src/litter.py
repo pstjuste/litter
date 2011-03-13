@@ -287,7 +287,7 @@ class ResponseThread(threading.Thread):
             for post in self.response:
                 data = json.dumps(post, ensure_ascii=False)
                 print 'ResponseThread: %s : %s' % (self.sender.dest, data)
-                self.sender.send(data)
+                self.sender.send(data.encode("utf-8"))
                 time.sleep(1)
 
 
