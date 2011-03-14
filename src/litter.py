@@ -12,6 +12,7 @@ import urlparse
 import Queue
 import BaseHTTPServer
 import logging
+import urllib
 from litterstore import LitterStore, StoreError
 
 MCAST_ADDR = "239.192.1.100"
@@ -58,6 +59,7 @@ class MulticastServer(threading.Thread):
         threading.Thread.__init__(self)
         self.queue = queue
         self.intf = intf
+        self.running = threading.Event()
         self.sock = MulticastServer.init_mcast(self.intf)
 
     # from http://code.activestate.com/recipes/439094-get-the-ip-address-
@@ -100,36 +102,19 @@ class MulticastServer(threading.Thread):
         return s
 
     def run(self):
-        while True:
+        self.running.set() #set to true
+        while self.running.is_set():
             data, addr = self.sock.recvfrom(1024)
             print "MulticastServer: sender ", repr(addr), data
             # we ignore our own requests
             if addr[0] != self.intf:
                 self.queue.put((data, UDPSender(self.sock, addr)))
 
-
-# Producer thread
-class UnicastServer(threading.Thread):
-
-    def __init__(self, queue, intf):
-        threading.Thread.__init__(self)
-        self.queue = queue
-        self.intf = intf
-        self.sock = self.init_ucast()
-
-    @staticmethod
-    def init_ucast(intf="127.0.0.1", port=0, addr=''):
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-        s.bind((addr, port))
-        return s
-
-    def run(self):
-        while True:
-            data, addr = self.sock.recvfrom(1024)
-            print "UnicastServer: sender ", repr(addr), data
-            if addr[0] != self.intf:
-                self.queue.put((data, UDPSender(self.sock, addr)))
+    def stop(self):
+        """set run to false, and send an empty message"""
+        self.running.clear() 
+        msender = UDPSender(self.usock, self.sock.getsockname())
+        msender.send("")
 
 
 class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
@@ -189,6 +174,14 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.send_file("web/jquery-ui.css", "text/css")
         elif path == "/json2.js":
             self.send_file("web/json2.js", "text/javascript")
+        elif path == "/ping":
+            #just to have a test method
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write("pong")
+        else:
+            self.send_error(404, "Not found")
 
     def send_file(self, path, ctype):
         try:
@@ -207,27 +200,38 @@ class HTTPThread(threading.Thread):
 
     def __init__(self, queue):
         threading.Thread.__init__(self)
-        self.http = BaseHTTPServer.HTTPServer(('127.0.0.1', 8000), HTTPHandler)
+        self.port = 8000
+        self.http = BaseHTTPServer.HTTPServer(('127.0.0.1', self.port), HTTPHandler)
         self.http.queue = queue
+        self.running = threading.Event()
 
     def run(self):
-        self.http.serve_forever()
+        self.running.set()
+        while self.running.is_set(): 
+          self.http.handle_request()
 
+    def stop(self):
+        self.running.clear()
+        #wake up the server:
+        urllib.urlopen("http://127.0.0.1:%i/ping" % (self.port,)).read()
 
 # Consumer thread
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue, uid, usock):
+    def __init__(self, queue, uid, sock):
         threading.Thread.__init__(self)
         self.queue = queue
         self.uid = uid
-        self.usock = usock
+        self.sock = sock
 
     def run(self):
         # SQL database has to be created in same thread
         self.litstore = LitterStore(self.uid)
         while True:
             data, sender = self.queue.get()
+            if not sender:
+                #this is how we stop
+                break
             data = unicode(data, "utf-8")
             print 'WorkerThread: %s : %s' % (sender.dest, data)
 
@@ -244,7 +248,7 @@ class WorkerThread(threading.Thread):
                     # if post from http it means this is a local post so
                     # we neeed to broadcast to multicast
                     addr = (MCAST_ADDR, MCAST_PORT)
-                    msender = UDPSender(self.usock, addr)
+                    msender = UDPSender(self.sock, addr)
                     mthread = ResponseThread(response, msender, self.uid)
                     mthread.start()
 
@@ -267,6 +271,9 @@ class WorkerThread(threading.Thread):
                 if isinstance(sender, HTTPSender):
                   sender.send_error(ex)
                 logging.exception(ex)
+
+    def stop(self):
+        self.queue.put((None,None))
 
 class ResponseThread(threading.Thread):
 
@@ -311,9 +318,6 @@ def main():
     httpd = HTTPThread(queue)
     httpd.start()
 
-    userver = UnicastServer(queue, intf)
-    userver.start()
-
     mserver = MulticastServer(queue, intf)
     mserver.start()
 
@@ -324,11 +328,17 @@ def main():
     time.sleep(5)
 
     addr = (MCAST_ADDR, MCAST_PORT)
-    while True:
+    try:
+      while True:
         # TODO - provide a more realistic time interval
         data = build_msg('discover', uid)
         mserver.sock.sendto(data, addr)
         time.sleep(300)
+    except:
+        #a Control-C will put us here, let's stop the other threads:
+        httpd.stop()
+        mserver.stop()
+        wthread.stop()
 
 
 if __name__ == '__main__':
