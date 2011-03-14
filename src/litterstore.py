@@ -72,26 +72,24 @@ class LitterStore:
       raise StoreError(str(ie))    
     return [(uid, postid, tstamp, msg, hashid)]
 
-  def get_posts(self, uid = None, begin = 0, until = sys.maxint):
+  def get_posts(self, uid = None, begin = 0, until = sys.maxint, limit = 100):
     msg = "SELECT uid, postid, time, msg, hashid FROM posts WHERE "
     if uid == None:
-      msg = msg + "time > ? and time < ? ORDER BY time DESC", (begin, until)
+      msg = msg + "time > ? and time < ? ORDER BY time DESC LIMIT ?", \
+          (begin, until, limit)
     else:
-      msg = msg + "uid == ? and time > ? and time < ? ORDER BY time DESC", \
-        (uid, begin, until)
+      msg = msg + "uid == ? and time > ? and time < ? ORDER BY time DESC \
+          LIMIT ?", (uid, begin, until, limit)
 
     return self._db_call(msg[0], msg[1])
 
   def discover(self, uid, begin, until):
     if uid in self.discovered:
       if self.discovered[uid] == begin:
-        #TODO - temporary disable for testing purposes/ will fix later
-        #return []
-        pass
-
+        return []
     self.discovered[uid] = begin
     return self._db_call("SELECT uid, postid, time, msg, hashid FROM posts \
-        WHERE time > ? and time < ?", (begin, until))
+        WHERE time > ? and time < ? LIMIT 50", (begin, until))
 
   def close(self):
     self.con.close()

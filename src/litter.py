@@ -113,7 +113,7 @@ class MulticastServer(threading.Thread):
     def stop(self):
         """set run to false, and send an empty message"""
         self.running.clear() 
-        msender = UDPSender(self.usock, self.sock.getsockname())
+        msender = UDPSender(self.sock, self.sock.getsockname())
         msender.send("")
 
 
@@ -328,11 +328,18 @@ def main():
     time.sleep(5)
 
     addr = (MCAST_ADDR, MCAST_PORT)
+    counter = 5
+    lasttime = 0
     try:
       while True:
-        # TODO - provide a more realistic time interval
-        data = build_msg('discover', uid)
+        # TODO - we change starttime every 30 minutes to trigger friends
+        # to send us last 20 posts they received within 30 minute interval
+        if counter % 6 == 0:
+            lasttime == int(time.time())
+
+        data = build_msg('discover', uid, lasttime)
         mserver.sock.sendto(data, addr)
+        counter += 1
         time.sleep(300)
     except:
         #a Control-C will put us here, let's stop the other threads:
