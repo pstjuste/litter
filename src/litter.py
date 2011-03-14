@@ -54,10 +54,9 @@ class HTTPSender(Sender):
 # Producer thread
 class MulticastServer(threading.Thread):
 
-    def __init__(self, queue, intf, usock):
+    def __init__(self, queue, intf):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.usock = usock
         self.intf = intf
         self.sock = MulticastServer.init_mcast(self.intf)
 
@@ -91,11 +90,12 @@ class MulticastServer(threading.Thread):
 
         print intf
 
-        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, \
-            socket.inet_aton(intf))
-
         s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
             socket.inet_aton(addr) + socket.inet_aton(intf))
+
+        # this is where I tell OS to send multicast over tapipop
+        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, \
+            socket.inet_aton(intf))
 
         return s
 
@@ -105,21 +105,22 @@ class MulticastServer(threading.Thread):
             print "MulticastServer: sender ", repr(addr), data
             # we ignore our own requests
             if addr[0] != self.intf:
-                self.queue.put((data, UDPSender(self.usock, addr)))
+                self.queue.put((data, UDPSender(self.sock, addr)))
 
 
 # Producer thread
 class UnicastServer(threading.Thread):
 
-    def __init__(self, queue, intf, usock):
+    def __init__(self, queue, intf):
         threading.Thread.__init__(self)
         self.queue = queue
         self.intf = intf
-        self.sock = usock
+        self.sock = self.init_ucast()
 
     @staticmethod
-    def init_ucast(port=0, addr=''):
+    def init_ucast(intf="127.0.0.1", port=0, addr=''):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
         s.bind((addr, port))
         return s
 
@@ -305,22 +306,18 @@ def main():
     uid = socket.gethostname()
     intf = MulticastServer.get_ip_address('tapipop')
 
-    # returns a UDP socket that is shared by multiple threads for sending
-    # I'm not sure if sockets are thread safe
-    # I am assuming that they are, NEED TO CHECK THAT
-    usock = UnicastServer.init_ucast()
     queue = Queue.Queue()
 
     httpd = HTTPThread(queue)
     httpd.start()
 
-    userver = UnicastServer(queue, intf, usock)
+    userver = UnicastServer(queue, intf)
     userver.start()
 
-    mserver = MulticastServer(queue, intf, usock)
+    mserver = MulticastServer(queue, intf)
     mserver.start()
 
-    wthread = WorkerThread(queue, uid, usock)
+    wthread = WorkerThread(queue, uid, mserver.sock)
     wthread.start()
 
     # wait a few seconds for threads to setup before sending first multicast
@@ -330,7 +327,7 @@ def main():
     while True:
         # TODO - provide a more realistic time interval
         data = build_msg('discover', uid)
-        usock.sendto(data, addr)
+        mserver.sock.sendto(data, addr)
         time.sleep(300)
 
 
