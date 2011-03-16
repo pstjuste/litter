@@ -60,7 +60,7 @@ body {
 }
 
 #resultsdiv {
-  width: auto;
+  width: 100%;
   margin: auto;
   padding: 0px 5px 5px 5px;
   float: left;

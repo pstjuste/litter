@@ -13,6 +13,7 @@ import Queue
 import BaseHTTPServer
 import logging
 import urllib
+import pickle
 from litterstore import LitterStore, StoreError
 
 MCAST_ADDR = "239.192.1.100"
@@ -52,7 +53,6 @@ class HTTPSender(Sender):
         self.queue.put((excep, None))
 
 
-# Producer thread
 class MulticastServer(threading.Thread):
 
     def __init__(self, queue, intf):
@@ -151,13 +151,13 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.server.queue.put((data, HTTPSender(queue, self.client_address)))
         (err, data) = queue.get()
         if err:
-          #Exception happened, TODO do something better here:
-          self.send_error(500, str(err))
+            #Exception happened, TODO do something better here:
+            self.send_error(500, str(err))
         else:
-          self.send_response(200)
-          self.send_header("Content-type", "text/x-json; charset=utf-8")
-          self.end_headers()
-          self.wfile.write(data.encode("utf-8"))
+            self.send_response(200)
+            self.send_header("Content-type", "text/x-json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(data.encode("utf-8"))
 
     def process_file(self, path):
         if path == "/":
@@ -215,12 +215,13 @@ class HTTPThread(threading.Thread):
         #wake up the server:
         urllib.urlopen("http://127.0.0.1:%i/ping" % (self.port,)).read()
 
-# Consumer thread
+
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue, uid, sock):
+    def __init__(self, queue, rqueue, uid, sock):
         threading.Thread.__init__(self)
         self.queue = queue
+        self.rqueue = rqueue
         self.uid = uid
         self.sock = sock
 
@@ -230,7 +231,8 @@ class WorkerThread(threading.Thread):
         while True:
             data, sender = self.queue.get()
             if not sender:
-                #this is how we stop
+                # we close DB then break out of loop to stop thread
+                self.litstore.close()
                 break
             data = unicode(data, "utf-8")
             print 'WorkerThread: %s : %s' % (sender.dest, data)
@@ -249,54 +251,58 @@ class WorkerThread(threading.Thread):
                     # we neeed to broadcast to multicast
                     addr = (MCAST_ADDR, MCAST_PORT)
                     msender = UDPSender(self.sock, addr)
-                    mthread = ResponseThread(response, msender, self.uid)
-                    mthread.start()
-
-                    # also send reply back to HTTP path
-                    hthread = ResponseThread(response, sender, self.uid)
-                    hthread.start()
-                elif method != 'post':
+                    self.rqueue.put((response, msender))
+                elif method != 'post' and isinstance(sender, UDPSender):
                     # we send response back through sender of request
-                    rthread = ResponseThread(response, sender, self.uid)
-                    rthread.start()
+                    self.rqueue.put((response, sender))
+
+                if isinstance(sender, HTTPSender):
+                    # also send reply back to HTTP path directly from
+                    # thread, may have to change later
+                    data = json.dumps(response, ensure_ascii=False)
+                    sender.send(data)
+
             except StoreError as ie:
                 if str(ie) == "column hashid is not unique":
-                  #this means we got a duplicate, no need to log:
-                  pass
+                    #this means we got a duplicate, no need to log:
+                    pass
                 else:
                     if isinstance(sender, HTTPSender):
                         sender.send_error(ex)
                     logging.exception(ie)
             except Exception as ex:
                 if isinstance(sender, HTTPSender):
-                  sender.send_error(ex)
+                    sender.send_error(ex)
                 logging.exception(ex)
 
     def stop(self):
         self.queue.put((None,None))
 
+
 class ResponseThread(threading.Thread):
 
-    def __init__(self, response, sender, uid):
+    def __init__(self, rqueue):
         threading.Thread.__init__(self)
-        self.response = response
-        self.sender = sender
+        self.rqueue = rqueue
 
     def run(self):
-        print 'ResponseThread: ', repr(self.sender.dest) #, repr(self.response)
+        while True:
+            response, sender = self.rqueue.get()
 
-        # If HTTP send all at once, if UDP send one by one
-        # to avoid fragmentation, wait one second to minimize
-        # probability of packet loss due to congestion
-        if isinstance(self.sender, HTTPSender):
-            data = json.dumps(self.response, ensure_ascii=False)
-            self.sender.send(data)
-        else:
-            for post in self.response:
+            if not sender:
+                # time to exit loop and thread
+                break
+
+            # to avoid fragmentation, wait one second to minimize
+            # probability of packet loss due to congestion
+            for post in response:
                 data = json.dumps(post, ensure_ascii=False)
-                print 'ResponseThread: %s : %s' % (self.sender.dest, data)
-                self.sender.send(data.encode("utf-8"))
+                print 'ResponseThread: %s : %s' % (sender.dest, data)
+                sender.send(data.encode("utf-8"))
                 time.sleep(1)
+
+    def stop(self):
+        self.rqueue.put((None, None))
 
 
 def build_msg(method, uid, begin = 0, until = sys.maxint):
@@ -308,12 +314,31 @@ def build_msg(method, uid, begin = 0, until = sys.maxint):
     return json.dumps(kwargs, ensure_ascii=False)
 
 
+def load_state():
+    state = { 'ltime' : 0}
+    try:
+        state_file = open('state.pkl', 'rb')
+        state = pickle.load(state_file)
+    except IOError as ex:
+        print ex
+
+    return state
+
+
+def update_state(state):
+    try:
+        state_file = open('state.pkl', 'wb')
+        pickle.dump(state, state_file)
+    except IOError as ex:
+        print ex 
+
 def main():
 
     uid = socket.gethostname()
-    intf = MulticastServer.get_ip_address('tapipop')
+    intf = MulticastServer.get_ip_address(sys.argv[1])
 
     queue = Queue.Queue()
+    rqueue = Queue.Queue()
 
     httpd = HTTPThread(queue)
     httpd.start()
@@ -321,31 +346,39 @@ def main():
     mserver = MulticastServer(queue, intf)
     mserver.start()
 
-    wthread = WorkerThread(queue, uid, mserver.sock)
+    rthread = ResponseThread(rqueue)
+    rthread.start()
+
+    wthread = WorkerThread(queue, rqueue, uid, mserver.sock)
     wthread.start()
 
-    # wait a few seconds for threads to setup before sending first multicast
+    state = load_state()
+
+    print "state = %s" % state
+
+    begin = int(state['ltime'])
+    until = int(time.time())
+
+    # wait a few seconds for threads to setup
     time.sleep(5)
 
     addr = (MCAST_ADDR, MCAST_PORT)
-    counter = 5
-    lasttime = 0
     try:
-      while True:
-        # TODO - we change starttime every 30 minutes to trigger friends
-        # to send us last 20 posts they received within 30 minute interval
-        if counter % 6 == 0:
-            lasttime == int(time.time())
+        while True:
+            # update time and save state to filesystem
+            state['ltime'] = time.time()
+            update_state(state)
 
-        data = build_msg('discover', uid, lasttime)
-        mserver.sock.sendto(data, addr)
-        counter += 1
-        time.sleep(300)
+            data = build_msg('discover', uid, begin, until)
+            mserver.sock.sendto(data, addr)
+            print "MainThread : %s %s" % (data, addr)
+            time.sleep(30)
     except:
         #a Control-C will put us here, let's stop the other threads:
         httpd.stop()
         mserver.stop()
         wthread.stop()
+        rthread.stop()
 
 
 if __name__ == '__main__':
