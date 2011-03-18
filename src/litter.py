@@ -237,7 +237,6 @@ class WorkerThread(threading.Thread):
             data = unicode(data, "utf-8")
             print 'WorkerThread: %s : %s' % (sender.dest, data)
 
-            # need try catch cause crazy things can happen
             try:
                 request = json.loads(data)
 
@@ -258,7 +257,7 @@ class WorkerThread(threading.Thread):
 
                 if isinstance(sender, HTTPSender):
                     # also send reply back to HTTP path directly from
-                    # thread, may have to change later
+                    # thread, since it's put in queue for HTTP thread
                     data = json.dumps(response, ensure_ascii=False)
                     sender.send(data)
 
@@ -289,17 +288,15 @@ class ResponseThread(threading.Thread):
         while True:
             response, sender = self.rqueue.get()
 
-            if not sender:
+            if None == sender:
                 # time to exit loop and thread
                 break
 
-            # to avoid fragmentation, wait one second to minimize
-            # probability of packet loss due to congestion
             for post in response:
                 data = json.dumps(post, ensure_ascii=False)
                 print 'ResponseThread: %s : %s' % (sender.dest, data)
                 sender.send(data.encode("utf-8"))
-                time.sleep(1)
+                time.sleep(0.1)
 
     def stop(self):
         self.rqueue.put((None, None))
@@ -335,7 +332,7 @@ def update_state(state):
 def main():
 
     uid = socket.gethostname()
-    intf = MulticastServer.get_ip_address(sys.argv[1])
+    intf = MulticastServer.get_ip_address('tapipop')
 
     queue = Queue.Queue()
     rqueue = Queue.Queue()
@@ -372,7 +369,7 @@ def main():
             data = build_msg('discover', uid, begin, until)
             mserver.sock.sendto(data, addr)
             print "MainThread : %s %s" % (data, addr)
-            time.sleep(30)
+            time.sleep(1080) # every 15 minutes
     except:
         #a Control-C will put us here, let's stop the other threads:
         httpd.stop()

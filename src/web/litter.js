@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+var txtime = 0;
+
 $(document).ready(init);
 
 function init() {
@@ -27,6 +29,7 @@ function init() {
   loadPage();
   loadHeader();
   loadPost();
+  createTable();
   getState();
   window.setInterval(getState, 15000);
 }
@@ -37,7 +40,7 @@ function loadPage() {
   $("<div/>", {'id' : 'subheader'}).appendTo("#header");
   $("<div/>", {'id' : 'maindiv'}).appendTo("#wrapper");
   $("<div/>", {'id' : 'postdiv'}).appendTo("#maindiv");
-  $("<div/>", {'id' : 'inputdiv'}).appendTo("#maindiv");
+  //$("<div/>", {'id' : 'inputdiv'}).appendTo("#maindiv");
   $("<div/>", {'id' : 'resultsdiv'}).appendTo("#maindiv");
 }
 
@@ -50,26 +53,40 @@ function loadHeader() {
 function doNothing() {}
 
 function loadPost() {
-  $("<input/>", {"name" : "post"}).appendTo("#postdiv");
-
+  var tarea = $("<textarea/>", {"name" : "post", "cols" : "100", "rows" : "3", 
+      id : "txt"}).appendTo("#postdiv");
   var msg = "Post";
-  $("<button/>", {text : msg, click : doPost}).appendTo("#postdiv");
+  var bpost = $("<button/>", {text : msg, click : doPost}
+      ).appendTo("#postdiv");
+  var par = $("<p/>", { id : "countid", text : '140 characters left'}
+      ).appendTo("#postdiv");
+  par.css({"color" : "#999999"});
 
+  tarea.keypress(messageCount);
+  tarea.mouseup(messageCount);
+}
+
+function messageCount() {
+    var msg = $(this).val();
+    var count = 140 - msg.length;
+    var elem = $("#countid").html(count + " characters left");
+    if (msg.length > 139) {
+      elem.css({"color" : "#FF0000"});
+    }
+    else {
+      elem.css({"color" : "#999999"});
+    }
 }
 
 function loadResults(state) {
-  $("#resultsdiv").text("");
-  createTable();
-
-  for (var i = 0; i < state.length; i++) {
+  for (var i = state.length-1; i >= 0; i--) {
     addResult(state[i]);
   }
-
 }
 
 function createTable() {
   var table = $("<table/>").appendTo("#resultsdiv");
-  var row = $("<tr/>").appendTo(table);
+  var row = $("<tr/>", { id : 'firstrow'}).appendTo(table);
 
   var imgcol = $("<td/>");
   var title = "";
@@ -82,47 +99,50 @@ function createTable() {
 }
 
 function addResult(result) {
-  var row = $("<tr/>").appendTo("#resultsdiv table");
-  var imgcol = $("<td/>");
+  if (txtime < result.txtime) {
+    txtime = result.txtime;
+  }
+  // time is returned in seconds, needs to be in milliseconds
+  var date = new Date(result.txtime * 1000);
+
+  var row = $("<tr/>");
+  $("#firstrow").after(row);
+  var imgcol = $("<td/>", { 'valign' : 'top'});
   var infocol = $("<td/>", { 'width': '100%'});
   var ratingcol = $("<td/>");
   imgcol.appendTo(row);
   infocol.appendTo(row);
   ratingcol.appendTo(row);
 
-  img_src = "http://gravatar.com/avatar/?d=mm"
+  img_src = "http://gravatar.com/avatar/" + result.uid + "?d=identicon"
   $("<img/>", {'src' : img_src, 'width' : '40px', 
     'height' : '40px'}).appendTo(imgcol);
 
   infocol.append($("<p/>", {text: result.uid, 'class' : 'name',
     'id' : result.uid, click : doNothing}));
 
-  infocol.append($("<p/>", { text: result.msg, 'class' : 'info'}));
-
+  infocol.append($("<p/>", { text: result.msg, 'class' : 'msg'}));
+  infocol.append($("<p/>", { text: date.toString(), 'class' : 'time'}));
   ratingcol.append($("<span/>", {text: '','class': 'rating'}));
-
-  $("body").data(result.uid, result);
-}
-
-function clearInput() {
-  $("#inputdiv").dialog("close");
-  $("#inputdiv").text("");
 }
 
 function getState() {
+  var ob = { "m" : "get_posts", "begin" : txtime, "limit" : 10 }
   $.ajax({type: "POST", url: "/api", dataType: 'json', 
-    data : "json={\"m\": \"get_posts\"}", success: processState});
+    data : {'json' : JSON.stringify(ob)}, success: processState});
 }
 
-
 function doPost() {
-  var msg = $(":input[name=post]").val();
+  var msg = $("textarea#txt").val();
+  if (msg.length > 140) {
+    alert("message is longer than 140 character");
+    return;
+  }
   var ob = { "m" : "post", "msg" : msg };
-  $(":input[name=post]").val('');
+  $("textarea#txt").val('');
   $.ajax({type: "POST", url: "/api", dataType: 'json', 
           data : {'json' : JSON.stringify(ob)} ,
           success: getState});
-  clearInput();
 }
 
 function processState(state) {

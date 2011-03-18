@@ -22,12 +22,13 @@ class LitterStore:
     self.uid = uid
     self.discovered = {}
     self._db_call("CREATE TABLE IF NOT EXISTS posts \
-        (uid TEXT, postid INTEGER, msg TEXT, time INTEGER, hashid TEXT, \
-        PRIMARY KEY(hashid ASC))")
+        (uid TEXT, postid INTEGER, msg TEXT, txtime INTEGER, rxtime INTEGER, \
+        hashid TEXT, PRIMARY KEY(hashid ASC))")
     cid = self._db_call("SELECT MAX(postid) FROM posts WHERE uid == ?", (uid, ))
     self.nextid = 0 if cid[0][0] == None else cid[0][0] + 1
 
   def _db_call(self, action, params = None):
+    print "dbcall -- %s %s" % (action, params)
     cur = self.con.cursor()
     cur.execute(action, params) if params != None else cur.execute(action)
     result = cur.fetchall()
@@ -35,50 +36,55 @@ class LitterStore:
     self.con.commit()
     return result
 
-  def _cal_hash(self, uid, msg, tstamp, postid):
+  def _cal_hash(self, uid, msg, txtime, postid):
     hash = hashlib.sha1()
-    tohash = str(uid) + msg + str(tstamp) + str(postid)
+    tohash = str(uid) + msg + str(txtime) + str(postid)
     #tohash is potentially unicode, if msg is, so we need to convert
     #back to bytes, to do this, we use utf-8:
     tohash = tohash.encode('utf-8')
     hash.update(tohash)
     return hash.hexdigest()
 
-  def post(self, msg, uid=None, tstamp = None, postid = -1, hashid=None):
-    # uid has to be set here because default variable does not recognize
-    # self because it's runtime state
+  def post(self, msg, uid=None, txtime = None, postid = -1, hashid=None):
+    # we always update the received time
+    rxtime = int(time.time())
+
     if uid == None:
       uid = self.uid
 
-    # we have to assign here, because default variables are only called
-    # once so time would not get updated if set as default variable
-    if tstamp == None:
-      tstamp = int(time.time())
+    if txtime == None:
+      txtime = rxtime
+
+    if len(msg) > 140:
+      raise Exception("message is too long, has to be less than 140 chars")
+
     if None != hashid:
-      if hashid != self._cal_hash(uid, msg, tstamp, postid):
+      if hashid != self._cal_hash(uid, msg, txtime, postid):
         raise Exception("hashid doesn't match:" + \
                         " uid: %s msg: %s time: %s postid: %s badhash: %s" \
-                        % (uid, msg, tstamp, postid, hashid))
+                        % (uid, msg, txtime, postid, hashid))
+
     if uid == self.uid and hashid == None:
       postid = self.nextid
-      hashid = self._cal_hash(uid, msg, tstamp, postid)
+      hashid = self._cal_hash(uid, msg, txtime, postid)
       self.nextid += 1
     if postid == -1:
       raise Exception("Invalid postid: " + str(postid))
+
     try:
-      self._db_call("INSERT INTO posts (uid, postid, time, msg, hashid) \
-          VALUES (?, ?, ?, ?, ?)", (uid, postid, tstamp, msg, hashid))
+      self._db_call("INSERT INTO posts (uid, postid, txtime, rxtime, msg, hashid) \
+          VALUES (?, ?, ?, ?, ?, ?)", (uid, postid, txtime, rxtime, msg, hashid))
     except sqlite3.IntegrityError as ie:
       raise StoreError(str(ie))    
-    return [(uid, postid, tstamp, msg, hashid)]
+    return [(uid, postid, txtime, msg, hashid)]
 
   def get_posts(self, uid = None, begin = 0, until = sys.maxint, limit = 100):
-    msg = "SELECT uid, postid, time, msg, hashid FROM posts WHERE "
+    msg = "SELECT uid, postid, rxtime, msg, hashid FROM posts WHERE "
     if uid == None:
-      msg = msg + "time > ? and time < ? ORDER BY time DESC LIMIT ?", \
+      msg = msg + "rxtime > ? and rxtime < ? ORDER BY rxtime DESC LIMIT ?", \
           (begin, until, limit)
     else:
-      msg = msg + "uid == ? and time > ? and time < ? ORDER BY time DESC \
+      msg = msg + "uid == ? and rxtime > ? and rxtime < ? ORDER BY rxtime DESC \
           LIMIT ?", (uid, begin, until, limit)
 
     return self._db_call(msg[0], msg[1])
@@ -88,8 +94,8 @@ class LitterStore:
       if self.discovered[uid] == begin:
         return []
     self.discovered[uid] = begin
-    return self._db_call("SELECT uid, postid, time, msg, hashid FROM posts \
-        WHERE time > ? and time < ? LIMIT 50", (begin, until))
+    return self._db_call("SELECT uid, postid, txtime, msg, hashid FROM posts \
+        WHERE txtime > ? and txtime < ? LIMIT 50", (begin, until))
 
   def close(self):
     self.con.close()
@@ -114,7 +120,7 @@ class LitterStore:
       kwargs = {}
       kwargs['uid'] = post[0]
       kwargs['postid'] = post[1]
-      kwargs['tstamp'] = post[2]
+      kwargs['txtime'] = post[2]
       kwargs['msg'] = post[3]
       kwargs['hashid'] = post[4]
       kwargs['m'] = 'post'
@@ -155,7 +161,7 @@ class LitterUnit(unittest.TestCase):
     after = int(time.time()) + 1
     litter.post(**{"uid" : "David", "msg" : "Litter is working great!"})
     litter.post(**{"uid" : "David", "msg" : "Litter is still working great!"})
-    litter.post(**{"uid" : "Alice", "postid" : 2, "tstamp" : before - 1, "msg" : "Hmm!"})
+    litter.post(**{"uid" : "Alice", "postid" : 2, "txtime" : before - 1, "msg" : "Hmm!"})
     self.assertEqual(len(litter.discover(**{"uid" : "Bob", "begin" : before, "until" : sys.maxint})), 2)
     self.assertEqual(len(litter.discover(**{"uid" : "Bob", "begin" : before, "until" : sys.maxint})), 0)
     self.assertEqual(len(litter.discover(**{"uid" : "Bob", "begin" : after, "until" : sys.maxint})), 0)
