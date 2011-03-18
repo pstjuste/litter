@@ -99,6 +99,11 @@ function createTable() {
 }
 
 function addResult(result) {
+  // we check to see if we already have this in our table
+  if ($("body").data(result.hashid) != null) {
+    return;
+  }
+
   if (txtime < result.txtime) {
     txtime = result.txtime;
   }
@@ -124,6 +129,10 @@ function addResult(result) {
   infocol.append($("<p/>", { text: result.msg, 'class' : 'msg'}));
   infocol.append($("<p/>", { text: date.toString(), 'class' : 'time'}));
   ratingcol.append($("<span/>", {text: '','class': 'rating'}));
+
+  // this is a patch so that we don't have duplicate messages in browser
+  // but this may cause memory leak, not too sure at the moment
+  $("body").data(result.hashid, result);
 }
 
 function getState() {
