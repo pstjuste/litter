@@ -76,7 +76,7 @@ class LitterStore:
           VALUES (?, ?, ?, ?, ?, ?)", (uid, postid, txtime, rxtime, msg, hashid))
     except sqlite3.IntegrityError as ie:
       raise StoreError(str(ie))    
-    return []
+    return [(uid, postid, txtime, msg, hashid)]
 
   def get_posts(self, uid = None, begin = 0, until = sys.maxint, limit = 100):
     msg = "SELECT uid, postid, rxtime, msg, hashid FROM posts WHERE "
