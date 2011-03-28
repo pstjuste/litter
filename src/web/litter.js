@@ -126,13 +126,31 @@ function addResult(result) {
   infocol.append($("<p/>", {text: result.uid, 'class' : 'name',
     'id' : result.uid, click : doNothing}));
 
-  infocol.append($("<p/>", { text: result.msg, 'class' : 'msg'}));
+  var msg = updateUrl(result.msg);
+
+  infocol.append($("<p/>", {'class' : 'msg'}).html(msg));
   infocol.append($("<p/>", { text: date.toString(), 'class' : 'time'}));
   ratingcol.append($("<span/>", {text: '','class': 'rating'}));
 
   // this is a patch so that we don't have duplicate messages in browser
   // but this may cause memory leak, not too sure at the moment
   $("body").data(result.hashid, result);
+}
+
+function updateUrl(msg) {
+  var strArray = msg.split(" ");
+  for (var i=0; i < strArray.length; i++) {
+    if (strArray[i].search("^http://") != -1) {
+      strArray[i] = "<a target=\"_blank\" href=\"" + strArray[i] + "\">" + 
+          strArray[i] + "</a>";
+    }
+    else if (strArray[i].search("^www.") != -1) {
+      strArray[i] = "<a target=\"_blank\" href=\"http://" + strArray[i] + "\">" + 
+          strArray[i] + "</a>";
+    }
+  }
+  var result = strArray.join(" ");
+  return result;
 }
 
 function getState() {
