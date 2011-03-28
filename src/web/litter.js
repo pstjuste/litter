@@ -119,7 +119,9 @@ function addResult(result) {
   infocol.appendTo(row);
   ratingcol.appendTo(row);
 
-  img_src = "http://gravatar.com/avatar/" + result.uid + "?d=identicon"
+  var md5_uid = hex_md5(result.uid);
+
+  img_src = "http://gravatar.com/avatar/" + md5_uid + "?d=identicon"
   $("<img/>", {'src' : img_src, 'width' : '40px', 
     'height' : '40px'}).appendTo(imgcol);
 

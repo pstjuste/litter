@@ -171,6 +171,8 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.send_file("web/jquery-ui.css", "text/css")
         elif path == "/json2.js":
             self.send_file("web/json2.js", "text/javascript")
+        elif path == "/md5.js":
+            self.send_file("web/md5.js", "text/javascript")
         elif path == "/ping":
             #just to have a test method
             self.send_response(200)
