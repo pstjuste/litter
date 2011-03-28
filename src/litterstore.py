@@ -79,12 +79,12 @@ class LitterStore:
     return [(uid, postid, txtime, msg, hashid)]
 
   def get_posts(self, uid = None, begin = 0, until = sys.maxint, limit = 100):
-    msg = "SELECT uid, postid, rxtime, msg, hashid FROM posts WHERE "
+    msg = "SELECT uid, postid, txtime, msg, hashid FROM posts WHERE "
     if uid == None:
-      msg = msg + "rxtime > ? and rxtime < ? ORDER BY rxtime DESC LIMIT ?", \
+      msg = msg + "txtime > ? and txtime < ? ORDER BY txtime DESC LIMIT ?", \
           (begin, until, limit)
     else:
-      msg = msg + "uid == ? and rxtime > ? and rxtime < ? ORDER BY rxtime DESC \
+      msg = msg + "uid == ? and txtime > ? and txtime < ? ORDER BY txtime DESC \
           LIMIT ?", (uid, begin, until, limit)
 
     return self._db_call(msg[0], msg[1])
