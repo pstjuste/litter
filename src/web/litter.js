@@ -156,7 +156,7 @@ function updateUrl(msg) {
 }
 
 function getState() {
-  var ob = { "m" : "get_posts", "begin" : txtime, "limit" : 10 }
+  var ob = { "m" : "get", "begin" : txtime, "limit" : 10 }
   $.ajax({type: "POST", url: "/api", dataType: 'json', 
     data : {'json' : JSON.stringify(ob)}, success: processState});
 }

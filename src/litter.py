@@ -13,7 +13,6 @@ import Queue
 import BaseHTTPServer
 import logging
 import urllib
-import pickle
 from litterstore import LitterStore, StoreError
 
 MCAST_ADDR = "239.192.1.100"
@@ -22,38 +21,46 @@ MCAST_PORT = 50000
 # Log everything, and send it to stderr.
 logging.basicConfig(level=logging.DEBUG)
 
-# Sender base class
 class Sender:
+    """Base class sender interface"""
+
     dest = 'not assigned'
 
     def send(self, data):
+        """Not implemented"""
         raise Exception("Base class, no implementation")
 
 
 class UDPSender(Sender):
+    """Implements sender over UDP socket"""
 
     def __init__(self, sock, dest):
         self.sock = sock
         self.dest = dest
 
     def send(self, data):
+        """Simply sends over UDP socket"""
         self.sock.sendto(data, self.dest)
 
 
 class HTTPSender(Sender):
+    """Implements sender over HTTP protocol"""
 
     def __init__(self, queue, dest):
         self.queue = queue
         self.dest = dest
 
     def send(self, data):
+        """Send message by putting in queue for processing"""
         self.queue.put((None, data))
 
     def send_error(self, excep):
+        """Send error by putting in queue"""
         self.queue.put((excep, None))
 
 
 class MulticastServer(threading.Thread):
+    """Listens for multicast and put them in queue"""
 
     def __init__(self, queue, intf):
         threading.Thread.__init__(self)
@@ -66,6 +73,8 @@ class MulticastServer(threading.Thread):
     # associated-with-a-network-inter/
     @staticmethod
     def get_ip_address(ifname):
+        """Retreives the ip address of an interface (Linux only)"""
+
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         return socket.inet_ntoa(fcntl.ioctl(
             s.fileno(),
@@ -75,11 +84,13 @@ class MulticastServer(threading.Thread):
 
     @staticmethod
     def init_mcast(intf="127.0.0.1", port=MCAST_PORT, addr=MCAST_ADDR):
+        """Initilizes a multicast socket"""
+
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         try:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            #s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         except AttributeError as ex:
             logging.exception(ex)
 
@@ -99,6 +110,8 @@ class MulticastServer(threading.Thread):
         return s
 
     def run(self):
+        """Waits in a loop for incoming packet then puts them in queue"""
+
         self.running.set() #set to true
         while self.running.is_set():
             data, addr = self.sock.recvfrom(1024)
@@ -108,15 +121,19 @@ class MulticastServer(threading.Thread):
                 self.queue.put((data, UDPSender(self.sock, addr)))
 
     def stop(self):
-        """set run to false, and send an empty message"""
+        """Set run to false, and send an empty message"""
+
         self.running.clear() 
         msender = UDPSender(self.sock, self.sock.getsockname())
         msender.send("")
 
 
 class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+    """Handles HTTP requests"""
 
     def do_GET(self):
+        """Handles get requests"""
+
         try:
             if self.path.startswith('/api'):
                 presults = urlparse.urlparse(self.path)
@@ -129,6 +146,8 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             logging.exception(ex)
 
     def do_POST(self):
+        """Handles post requests"""
+
         try:
             if self.path.startswith('/api'):
                 presults = urlparse.urlparse(self.path)
@@ -142,11 +161,15 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             logging.exception(ex);
 
     def process_request(self, request):
+        """Extract json from request and queues it for processing"""
+
         print "HTTPHandler: %s " % request
         data = request['json'][0]
         queue = Queue.Queue()
         self.server.queue.put((data, HTTPSender(queue, self.client_address)))
-        (err, data) = queue.get()
+        # waits for response from workerthread
+        err, data = queue.get()
+
         if err:
             #Exception happened, TODO do something better here:
             self.send_error(500, str(err))
@@ -157,6 +180,8 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.wfile.write(data.encode("utf-8"))
 
     def process_file(self, path):
+        """Handles HTTP file requests"""
+
         if path == "/":
             self.send_file("web/litter.html", "text/html")
         elif path == "/litter.css":
@@ -200,7 +225,8 @@ class HTTPThread(threading.Thread):
     def __init__(self, queue):
         threading.Thread.__init__(self)
         self.port = 8000
-        self.http = BaseHTTPServer.HTTPServer(('127.0.0.1', self.port), HTTPHandler)
+        self.http = BaseHTTPServer.HTTPServer(('0.0.0.0', self.port), 
+                    HTTPHandler)
         self.http.queue = queue
         self.running = threading.Event()
 
@@ -217,16 +243,15 @@ class HTTPThread(threading.Thread):
 
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue, rqueue, uid, sock):
+    def __init__(self, queue, rqueue, sock):
         threading.Thread.__init__(self)
         self.queue = queue
         self.rqueue = rqueue
-        self.uid = uid
         self.sock = sock
 
     def run(self):
         # SQL database has to be created in same thread
-        self.litstore = LitterStore(self.uid)
+        self.litstore = LitterStore()
         while True:
             data, sender = self.queue.get()
             if not sender:
@@ -246,7 +271,7 @@ class WorkerThread(threading.Thread):
 
                 if method == 'post' and isinstance(sender, HTTPSender):
                     # if post from http it means this is a local post so
-                    # we neeed to broadcast to multicast
+                    # we neeed to broadcast via multicast
                     addr = (MCAST_ADDR, MCAST_PORT)
                     msender = UDPSender(self.sock, addr)
                     self.rqueue.put((response, msender))
@@ -301,43 +326,12 @@ class ResponseThread(threading.Thread):
         self.rqueue.put((None, None))
 
 
-def build_msg(method, uid, begin = 0, until = sys.maxint):
-    kwargs = {}
-    kwargs['m'] = method
-    kwargs['uid'] = uid
-    kwargs['begin'] = begin
-    kwargs['until'] = until
-    return json.dumps(kwargs, ensure_ascii=False)
-
-
-def load_state():
-    state = { 'ltime' : 0}
-    try:
-        state_file = open('state.pkl', 'rb')
-        state = pickle.load(state_file)
-    except IOError as ex:
-        print ex
-
-    return state
-
-
-def update_state(state):
-    try:
-        state_file = open('state.pkl', 'wb')
-        pickle.dump(state, state_file)
-    except IOError as ex:
-        print ex 
-
 def main():
 
-    uid = socket.gethostname()
-    intf = MulticastServer.get_ip_address('tapipop')
+    intf = MulticastServer.get_ip_address(sys.argv[1])
 
     queue = Queue.Queue()
     rqueue = Queue.Queue()
-
-    httpd = HTTPThread(queue)
-    httpd.start()
 
     mserver = MulticastServer(queue, intf)
     mserver.start()
@@ -345,32 +339,25 @@ def main():
     rthread = ResponseThread(rqueue)
     rthread.start()
 
-    wthread = WorkerThread(queue, rqueue, uid, mserver.sock)
+    wthread = WorkerThread(queue, rqueue, mserver.sock)
     wthread.start()
 
-    state = load_state()
-
-    print "state = %s" % state
-
-    begin = int(state['ltime'])
-    until = int(time.time())
+    httpd = HTTPThread(queue)
+    httpd.start()
 
     # wait a few seconds for threads to setup
     time.sleep(5)
 
     addr = (MCAST_ADDR, MCAST_PORT)
+    request = { 'm' : 'pull_req' }
+    data = json.dumps(request)
+
     try:
         while True:
-            # update time and save state to filesystem
-            state['ltime'] = time.time()
-            update_state(state)
-
-            data = build_msg('discover', uid, begin, until)
-            mserver.sock.sendto(data, addr)
-            print "MainThread : %s %s" % (data, addr)
-            time.sleep(1080) # every 15 minutes
+            queue.put((data, UDPSender(mserver.sock,addr)))
+            time.sleep(300) # every 5 minutes
     except:
-        #a Control-C will put us here, let's stop the other threads:
+        #Control-C will put us here, let's stop the other threads:
         httpd.stop()
         mserver.stop()
         wthread.stop()
