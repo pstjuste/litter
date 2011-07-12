@@ -328,7 +328,10 @@ class ResponseThread(threading.Thread):
 
 def main():
 
-    intf = MulticastServer.get_ip_address(sys.argv[1])
+    if len(sys.argv) > 0:
+        intf = MulticastServer.get_ip_address(sys.argv[1])
+    else:
+        intf = MulticastServer.get_ip_address('tapipop')
 
     queue = Queue.Queue()
     rqueue = Queue.Queue()
@@ -349,13 +352,23 @@ def main():
     time.sleep(5)
 
     addr = (MCAST_ADDR, MCAST_PORT)
-    request = { 'm' : 'pull_req' }
-    data = json.dumps(request)
+    sender = UDPSender(mserver.sock, addr)
 
+    pull_req = { 'm' : 'pull_req' }
+    pull_data = json.dumps(pull_req)
+
+    gap_req = { 'm' : 'gap_req' }
+    gap_data = json.dumps(gap_req)
+
+    counter = 0
     try:
         while True:
-            queue.put((data, UDPSender(mserver.sock,addr)))
-            time.sleep(300) # every 5 minutes
+            if counter % 10 == 0:
+                queue.put((pull_data, sender))
+
+            queue.put((gap_data, sender))
+            counter += 1
+            time.sleep(30)
     except:
         #Control-C will put us here, let's stop the other threads:
         httpd.stop()

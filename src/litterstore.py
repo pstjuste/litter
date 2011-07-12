@@ -18,7 +18,7 @@ class LitterStore:
     def __init__(self, uid = None, test = False):
         self.uid = uid if uid != None else socket.gethostname()
         self.con = sqlite3.connect(":memory:" if test else self.uid + ".db")
-        self.nextid = 0
+        self.nextid = 1
         self.__init_db()
 
     @staticmethod
@@ -72,7 +72,6 @@ class LitterStore:
             self.__db_call(msg, (txtime, uid, fid))
 
     def __post(self, msg, uid=None, txtime = None, postid = -1, hashid=None):
-
         rxtime = 0
 
         if uid == None:
@@ -130,8 +129,60 @@ class LitterStore:
 
         for fid, txtime in friends:
             self.__update_time(uid, fid, txtime)
-            posts = self.__get(fid, txtime)
-            results.extend(posts)
+            results.extend(self.__get(fid, txtime))
+
+        return results
+
+    # Code adapted from Ben Englard implemetation
+    def __find_gaps_by_uid(self, uid):
+        msg = ("SELECT postid, txtime FROM posts WHERE uid == ? " 
+               "ORDER BY txtime DESC")
+        results = self.__db_call(msg, (uid,))
+        gaps = []
+        last_item = None
+
+        for postid, txtime in results:
+            if last_item == None:
+                last_item = (postid, txtime)
+                continue
+
+            diff = last_item[0] - postid
+
+            if diff > 1:
+                gaps.append((txtime, last_item[1]))
+
+            last_item = (postid, txtime)
+
+        # last item should be 1, if not we have a gap
+        if last_item[0] != 1:
+            gaps.append((0, last_item[1]))
+
+        return gaps
+
+    def __find_all_gaps(self):
+        msg = "SELECT DISTINCT fid FROM friends WHERE uid ==?"
+        fids = self.__db_call(msg, (self.uid,))
+        results = {}
+
+        for fid, in fids:
+            results[fid] = self.__find_gaps_by_uid(fid)
+
+        return results;
+
+    def __gap_req(self):
+        request = {'m': 'gap_rcv', 'uid' : self.uid }
+        request['friends'] = self.__find_all_gaps()
+        return request
+
+    def __gap_rcv(self, uid = None, friends = None):
+        results = []
+        self.__update_time(self.uid, uid, 0)
+
+        for fid, gaps in friends.iteritems():
+            for start, end in gaps:
+                self.__update_time(uid, fid, end)
+                posts = self.__get(fid, start, end)
+                results.extend(posts)
 
         return results
 
@@ -165,6 +216,10 @@ class LitterStore:
             results = self.__pull_req()
         elif method == 'pull_rcv':
             results = self.__pull_rcv(**request)
+        elif method == 'gap_req':
+            results = self.__gap_req()
+        elif method == 'gap_rcv':
+            results = self.__gap_rcv(**request)
 
         return self.__process_results(results)
 
@@ -191,7 +246,7 @@ class LitterUnitSingle(unittest.TestCase):
 
         request = {'m': 'post', 'msg' : msg }
         results = self.litter.process(request)
-        self.assertEqual(results[0]['postid'], 1)
+        self.assertEqual(results[0]['postid'], 2)
 
         request = {'m': 'get'}
         results = self.litter.process(request)
@@ -267,6 +322,39 @@ class LitterUnitDouble(unittest.TestCase):
         results_b = self.litter_b.process(request_b)
 
         self.assertEqual(results_b[0]['msg'], msg)
+
+    def test_gap(self):
+        request_a = {'m' : 'gap_req'}
+        results_a = self.litter_a.process(request_a)
+        self.assertEqual(results_a[0]['m'], 'gap_rcv')
+        self.assertEqual(len(results_a[0]['friends']), 0)
+
+        request_b = results_a[0]
+        results_b = self.litter_b.process(request_b)
+        self.assertEqual(len(results_b), 0)
+
+        msg = 'this is a test'
+        request_a = {'m': 'post', 'msg' : msg}
+        results_a = self.litter_a.process(request_a)
+        request_a = {'m': 'post', 'msg' : msg}
+        results_a = self.litter_a.process(request_a)
+        self.assertEqual(results_a[0]['postid'], 2)
+        self.assertEqual(results_a[0]['msg'], msg)
+
+        request_b = results_a[0]
+        results_b = self.litter_b.process(request_b)
+
+        request_b = {'m': 'gap_req'}
+        results_b = self.litter_b.process(request_b)
+        self.assertEqual(results_b[0]['m'], 'gap_rcv')
+        self.assertEqual(results_b[0]['friends'].keys()[0], 'usera')
+
+        request_a = results_b[0]
+        results_a = self.litter_a.process(request_a)
+        self.assertEqual(results_a[0]['postid'], 1)
+        self.assertEqual(results_a[0]['msg'], msg)
+
+
 
 if __name__ == '__main__':
     unittest.main()
