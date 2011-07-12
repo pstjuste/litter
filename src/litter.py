@@ -328,7 +328,7 @@ class ResponseThread(threading.Thread):
 
 def main():
 
-    if len(sys.argv) > 0:
+    if len(sys.argv) > 1:
         intf = MulticastServer.get_ip_address(sys.argv[1])
     else:
         intf = MulticastServer.get_ip_address('tapipop')
