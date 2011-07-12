@@ -154,7 +154,7 @@ class LitterStore:
             last_item = (postid, txtime)
 
         # last item should be 1, if not we have a gap
-        if last_item[0] != 1:
+        if last_item != None and last_item[0] != 1:
             gaps.append((0, last_item[1]))
 
         return gaps
