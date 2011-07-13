@@ -360,15 +360,11 @@ def main():
     gap_req = { 'm' : 'gap_req' }
     gap_data = json.dumps(gap_req)
 
-    counter = 0
     try:
         while True:
-            if counter % 10 == 0:
-                queue.put((pull_data, sender))
-
+            queue.put((pull_data, sender))
             queue.put((gap_data, sender))
-            counter += 1
-            time.sleep(30)
+            time.sleep(60)
     except:
         #Control-C will put us here, let's stop the other threads:
         httpd.stop()

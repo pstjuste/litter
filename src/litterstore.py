@@ -165,13 +165,22 @@ class LitterStore:
         results = {}
 
         for fid, in fids:
-            results[fid] = self.__find_gaps_by_uid(fid)
+            gaps = self.__find_gaps_by_uid(fid)
+
+            # only add if gaps are found
+            if len(gaps) > 0:
+                results[fid] = self.__find_gaps_by_uid(fid)
 
         return results;
 
     def __gap_req(self):
-        request = {'m': 'gap_rcv', 'uid' : self.uid }
-        request['friends'] = self.__find_all_gaps()
+        request = []
+        gap_list = self.__find_all_gaps()
+
+        # only return dictionary if gaps are found
+        if len(gap_list) > 0:
+            request = {'m': 'gap_rcv', 'uid' : self.uid, 'friends': gap_list}
+
         return request
 
     def __gap_rcv(self, uid = None, friends = None):
@@ -326,12 +335,8 @@ class LitterUnitDouble(unittest.TestCase):
     def test_gap(self):
         request_a = {'m' : 'gap_req'}
         results_a = self.litter_a.process(request_a)
-        self.assertEqual(results_a[0]['m'], 'gap_rcv')
-        self.assertEqual(len(results_a[0]['friends']), 0)
-
-        request_b = results_a[0]
-        results_b = self.litter_b.process(request_b)
-        self.assertEqual(len(results_b), 0)
+        self.assertEqual(len(results_a), 0)
+        self.assertTrue(isinstance(results_a, list))
 
         msg = 'this is a test'
         request_a = {'m': 'post', 'msg' : msg}
