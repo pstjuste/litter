@@ -101,13 +101,20 @@ class MulticastServer(threading.Thread):
 
         print intf
 
-        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, \
-            socket.inet_aton(intf) + socket.inet_aton('0.0.0.0'))
+        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
+            socket.inet_aton(intf))
 
-        s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP, \
+        s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP,
             socket.inet_aton(addr) + socket.inet_aton(intf))
 
         return s
+
+    @staticmethod
+    def close_mcast(s, intf="127.0.0.1", addr=MCAST_ADDR):
+        s.setsockopt(socket.SOL_IP, socket.IP_DROP_MEMBERSHIP,
+            socket.inet_aton(addr) + socket.inet_aton(intf))
+        s.close()
+
 
     def run(self):
         """Waits in a loop for incoming packet then puts them in queue"""
@@ -127,6 +134,8 @@ class MulticastServer(threading.Thread):
         msender = UDPSender(self.sock, self.sock.getsockname())
         msender.send("")
 
+    def __del__(self):
+        self.close_mcast(self.sock, self.intf)
 
 class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     """Handles HTTP requests"""
