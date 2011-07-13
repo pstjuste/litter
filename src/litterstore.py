@@ -127,9 +127,13 @@ class LitterStore:
         results = []
         self.__update_time(self.uid, uid, 0)
 
-        for fid, txtime in friends:
-            self.__update_time(uid, fid, txtime)
-            results.extend(self.__get(fid, txtime))
+        if friends != None and len(friends) == 0:
+            # if friends is empty, this is a new node, so reply your posts
+            results = self.__get(self.uid)
+        else:
+            for fid, txtime in friends:
+                self.__update_time(uid, fid, txtime)
+                results.extend(self.__get(fid, txtime))
 
         return results
 
