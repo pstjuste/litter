@@ -13,6 +13,7 @@ import Queue
 import BaseHTTPServer
 import logging
 import urllib
+import getopt
 from litterstore import LitterStore, StoreError
 
 MCAST_ADDR = "239.192.1.100"
@@ -252,15 +253,16 @@ class HTTPThread(threading.Thread):
 
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue, rqueue, sock):
+    def __init__(self, queue, rqueue, sock, name):
         threading.Thread.__init__(self)
         self.queue = queue
         self.rqueue = rqueue
         self.sock = sock
+        self.name = name
 
     def run(self):
         # SQL database has to be created in same thread
-        self.litstore = LitterStore()
+        self.litstore = LitterStore(self.name)
         while True:
             data, sender = self.queue.get()
             if not sender:
@@ -337,11 +339,25 @@ class ResponseThread(threading.Thread):
 
 def main():
 
-    if len(sys.argv) > 1:
-        intf = MulticastServer.get_ip_address(sys.argv[1])
-    else:
-        intf = MulticastServer.get_ip_address('tapipop')
+    dev = "tapipop"
+    name = socket.gethostname()
 
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "i:n:")
+    except getopt.GetoptError, err:
+        print "usage: ./litter.py -i intf -n name"
+
+    for o, a in opts:
+        print "o = %s, a = %s" % (o,a)
+        if o == "-i":
+            dev = a
+        elif o == "-n":
+            name = a
+        else:
+            assert False, "unhandled option"
+
+
+    intf = MulticastServer.get_ip_address(dev)
     queue = Queue.Queue()
     rqueue = Queue.Queue()
 
@@ -351,7 +367,7 @@ def main():
     rthread = ResponseThread(rqueue)
     rthread.start()
 
-    wthread = WorkerThread(queue, rqueue, mserver.sock)
+    wthread = WorkerThread(queue, rqueue, mserver.sock, name)
     wthread.start()
 
     httpd = HTTPThread(queue)
