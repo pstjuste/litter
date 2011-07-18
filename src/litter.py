@@ -348,7 +348,6 @@ def main():
         print "usage: ./litter.py -i intf -n name"
 
     for o, a in opts:
-        print "o = %s, a = %s" % (o,a)
         if o == "-i":
             dev = a
         elif o == "-n":
