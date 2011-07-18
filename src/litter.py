@@ -337,6 +337,9 @@ class ResponseThread(threading.Thread):
         self.rqueue.put((None, None))
 
 
+def usage():
+    print "usage: ./litter.py [-i intf] [-n name]"
+
 def main():
 
     dev = "tapipop"
@@ -345,7 +348,8 @@ def main():
     try:
         opts, args = getopt.getopt(sys.argv[1:], "i:n:")
     except getopt.GetoptError, err:
-        print "usage: ./litter.py -i intf -n name"
+        usage()
+        sys.exit()
 
     for o, a in opts:
         if o == "-i":
@@ -353,8 +357,8 @@ def main():
         elif o == "-n":
             name = a
         else:
-            assert False, "unhandled option"
-
+            usage()
+            sys.exit()
 
     intf = MulticastServer.get_ip_address(dev)
     queue = Queue.Queue()
