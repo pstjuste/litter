@@ -78,7 +78,6 @@ class MulticastServer(threading.Thread):
         ip = ""
         if os.name != "nt":
             import fcntl
-            import struct
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             ip = socket.inet_ntoa(fcntl.ioctl(
                             s.fileno(),
@@ -86,7 +85,8 @@ class MulticastServer(threading.Thread):
                             struct.pack('256s', ifname[:15])
                             )[20:24])
         else:
-            ip = socket.gethostbyname(socket.gethostname())
+            ip =([ip for ip in socket.gethostbyname_ex(socket.gethostname())[2]
+                  if not ip.startswith("127.")][0]) 
         return ip
 
     @staticmethod
