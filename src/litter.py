@@ -91,7 +91,6 @@ class MulticastServer(threading.Thread):
 
         try:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            #s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         except AttributeError as ex:
             logging.exception(ex)
 
@@ -125,7 +124,8 @@ class MulticastServer(threading.Thread):
             data, addr = self.sock.recvfrom(1024)
             print "MulticastServer: sender ", repr(addr), data
             # we ignore our own requests
-            if addr[0] != self.intf:
+            #if addr[0] != self.intf:
+            if True:
                 self.queue.put((data, UDPSender(self.sock, addr)))
 
     def stop(self):
@@ -232,11 +232,10 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 class HTTPThread(threading.Thread):
 
-    def __init__(self, queue):
+    def __init__(self, queue, addr='127.0.0.1', port=8000):
         threading.Thread.__init__(self)
-        self.port = 8000
-        self.http = BaseHTTPServer.HTTPServer(('0.0.0.0', self.port), 
-                    HTTPHandler)
+        self.port = port
+        self.http = BaseHTTPServer.HTTPServer((addr, port), HTTPHandler)
         self.http.queue = queue
         self.running = threading.Event()
 
@@ -338,15 +337,15 @@ class ResponseThread(threading.Thread):
 
 
 def usage():
-    print "usage: ./litter.py [-i intf] [-n name]"
-
+    print "usage: ./litter.py [-i intf] [-n name] [-p port]"
 def main():
 
     dev = "tapipop"
     name = socket.gethostname()
+    port = "8080";
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "i:n:")
+        opts, args = getopt.getopt(sys.argv[1:], "i:n:p:")
     except getopt.GetoptError, err:
         usage()
         sys.exit()
@@ -356,6 +355,8 @@ def main():
             dev = a
         elif o == "-n":
             name = a
+        elif o == "-p":
+            port = a
         else:
             usage()
             sys.exit()
@@ -373,7 +374,7 @@ def main():
     wthread = WorkerThread(queue, rqueue, mserver.sock, name)
     wthread.start()
 
-    httpd = HTTPThread(queue)
+    httpd = HTTPThread(queue, port=int(port))
     httpd.start()
 
     # wait a few seconds for threads to setup
