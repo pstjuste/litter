@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import socket
-import fcntl
+import os
 import struct
 import time
 import sys
@@ -75,13 +75,19 @@ class MulticastServer(threading.Thread):
     @staticmethod
     def get_ip_address(ifname):
         """Retreives the ip address of an interface (Linux only)"""
-
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        return socket.inet_ntoa(fcntl.ioctl(
-            s.fileno(),
-            0x8915,  # SIOCGIFADDR
-            struct.pack('256s', ifname[:15])
-            )[20:24])
+        ip = ""
+        if os.name != "nt":
+            import fcntl
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            ip = socket.inet_ntoa(fcntl.ioctl(
+                            s.fileno(),
+                            0x8915,  # SIOCGIFADDR
+                            struct.pack('256s', ifname[:15])
+                            )[20:24])
+        else:
+            ip =([ip for ip in socket.gethostbyname_ex(socket.gethostname())[2]
+                  if not ip.startswith("127.")][0]) 
+        return ip
 
     @staticmethod
     def init_mcast(intf="127.0.0.1", port=MCAST_PORT, addr=MCAST_ADDR):

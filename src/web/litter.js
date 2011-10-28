@@ -53,6 +53,8 @@ function loadHeader() {
 function doNothing() {}
 
 function loadPost() {
+  var q = $("<h1/>", {text : "What's new?"}).appendTo("#postdiv");
+  q.css({"color" : "gray", "text-align" : "left"});
   var tarea = $("<textarea/>", {"name" : "post", "cols" : "100", "rows" : "3", 
       id : "txt"}).appendTo("#postdiv");
   var msg = "Post";
@@ -60,8 +62,9 @@ function loadPost() {
       ).appendTo("#postdiv");
   var par = $("<p/>", { id : "countid", text : '140 characters left'}
       ).appendTo("#postdiv");
-  par.css({"color" : "#999999"});
-
+  par.css({"color" : "black", "text-align" : "right", "width" : "600px"});
+  par.css({"font-size" : "20px"});
+	
   tarea.keypress(messageCount);
   tarea.mouseup(messageCount);
 }
@@ -74,7 +77,7 @@ function messageCount() {
       elem.css({"color" : "#FF0000"});
     }
     else {
-      elem.css({"color" : "#999999"});
+      elem.css({"color" : "black"});
     }
 }
 
@@ -150,6 +153,30 @@ function updateUrl(msg) {
       strArray[i] = "<a target=\"_blank\" href=\"http://" + strArray[i] + "\">" + 
           strArray[i] + "</a>";
     }
+    else if (strArray[i].indexOf(".com") != -1) {
+      strArray[i] = "<a target=\"_blank\" href=\"http://" + strArray[i] + "\">" + 
+          strArray[i] + "</a>";
+    }
+    else if (strArray[i].indexOf(".net") != -1) {
+      strArray[i] = "<a target=\"_blank\" href=\"http://" + strArray[i] + "\">" + 
+          strArray[i] + "</a>";
+    }
+    else if (strArray[i].indexOf(".edu") != -1) {
+      strArray[i] = "<a target=\"_blank\" href=\"http://" + strArray[i] + "\">" + 
+          strArray[i] + "</a>";
+    }
+    else if (strArray[i].indexOf(".org") != -1) {
+      strArray[i] = "<a target=\"_blank\" href=\"http://" + strArray[i] + "\">" + 
+          strArray[i] + "</a>";
+    }
+    else if (strArray[i].indexOf(".gov") != -1) {
+      strArray[i] = "<a target=\"_blank\" href=\"http://" + strArray[i] + "\">" + 
+          strArray[i] + "</a>";
+    }
+    else if (strArray[i].indexOf("@") != -1) {
+      strArray[i] = "<a target=\"_blank\" href=\"http://" + strArray[i] + "\">" + 
+          strArray[i] + "</a>";
+    }
   }
   var result = strArray.join(" ");
   return result;
@@ -164,7 +191,7 @@ function getState() {
 function doPost() {
   var msg = $("textarea#txt").val();
   if (msg.length > 140) {
-    alert("message is longer than 140 character");
+    alert("Message is longer than 140 characters");
     return;
   }
   var ob = { "m" : "post", "msg" : msg };
