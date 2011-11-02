@@ -14,7 +14,6 @@ class StoreError(Exception):
 class LitterStore:
     """Handles storage and processes requests"""
 
-
     def __init__(self, uid = None, test = False):
         self.uid = uid if uid != None else socket.gethostname()
         self.con = sqlite3.connect(":memory:" if test else self.uid + ".db")
@@ -199,42 +198,52 @@ class LitterStore:
 
         return results
 
-    def __process_results(self, response):
+    def __process_results(self, response, meth, addr, ttl):
         results = []
-        if isinstance(response, list):
-            for post in response:
-                kwargs = {}
-                kwargs['uid'] = post[0]
-                kwargs['postid'] = post[1]
-                kwargs['txtime'] = post[2]
-                kwargs['msg'] = post[3]
-                kwargs['hashid'] = post[4]
-                kwargs['m'] = 'post'
-                results.append(kwargs)
-        elif isinstance(response, dict):
-            results.append(response)
+
+        if ttl != None and ttl > 0:
+            if isinstance(response, list):
+                for post in response:
+                    kwargs = {}
+                    kwargs['uid'] = post[0]
+                    kwargs['postid'] = post[1]
+                    kwargs['txtime'] = post[2]
+                    kwargs['msg'] = post[3]
+                    kwargs['hashid'] = post[4]
+                    kwargs['m'] = 'post'
+                    kwargs['ttl'] = ttl - 1
+                    kwargs['addr'] = addr
+                    results.append(kwargs)
+            elif isinstance(response, dict):
+                results.append(response)
 
         return results
 
-    def process(self, request):
+    def process(self, request, addr='addr'):
         results = []
-        method = request['m']
-        del request['m']
+        meth = request.pop('m', None)
+        ttl = request.pop('ttl', 1)
+        addr = request.pop('addr', addr)
+        uid = request.get('uid', None)
 
-        if method == 'post':
+        # we do not process our own requests
+        if uid != None and uid == self.uid:
+            return results
+
+        if meth == 'post':
             results = self.__post(**request)
-        elif method == 'get':
+        elif meth == 'get':
             results = self.__get(**request)
-        elif method == 'pull_req':
+        elif meth == 'pull_req':
             results = self.__pull_req()
-        elif method == 'pull_rcv':
+        elif meth == 'pull_rcv':
             results = self.__pull_rcv(**request)
-        elif method == 'gap_req':
+        elif meth == 'gap_req':
             results = self.__gap_req()
-        elif method == 'gap_rcv':
+        elif meth == 'gap_rcv':
             results = self.__gap_rcv(**request)
 
-        return self.__process_results(results)
+        return self.__process_results(results, meth, addr, ttl)
 
     def close(self):
         self.con.close()
@@ -253,11 +262,11 @@ class LitterUnitSingle(unittest.TestCase):
     def test_posts(self):
         msg = 'this is a test'
 
-        request = {'m': 'post', 'msg' : msg }
+        request = {'m': 'post', 'msg' : msg, 'ttl' : 1 }
         results = self.litter.process(request)
         self.assertEqual(results[0]['msg'], msg)
 
-        request = {'m': 'post', 'msg' : msg }
+        request = {'m': 'post', 'msg' : msg , 'ttl' : 1}
         results = self.litter.process(request)
         self.assertEqual(results[0]['postid'], 2)
 
@@ -332,6 +341,7 @@ class LitterUnitDouble(unittest.TestCase):
         results_a = self.litter_a.process(request_a)
 
         request_b = results_a[0]
+        request_b['ttl'] = 1
         results_b = self.litter_b.process(request_b)
 
         self.assertEqual(results_b[0]['msg'], msg)

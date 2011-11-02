@@ -18,6 +18,8 @@ from litterstore import LitterStore, StoreError
 
 MCAST_ADDR = "239.192.1.100"
 MCAST_PORT = 50000
+LOOP_ADDR = "127.0.0.1"
+IP_ANY = "0.0.0.0"
 
 # Log everything, and send it to stderr.
 logging.basicConfig(level=logging.DEBUG)
@@ -35,14 +37,17 @@ class Sender:
 class UDPSender(Sender):
     """Implements sender over UDP socket"""
 
-    def __init__(self, sock, dest):
+    def __init__(self, sock, intfs, dest):
         self.sock = sock
         self.dest = dest
+        self.intfs = intfs
 
     def send(self, data):
         """Simply sends over UDP socket"""
-        self.sock.sendto(data, self.dest)
-
+        for intf in self.intfs:
+            self.sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
+                socket.inet_aton(intf))
+            self.sock.sendto(data, self.dest)
 
 class HTTPSender(Sender):
     """Implements sender over HTTP protocol"""
@@ -63,19 +68,20 @@ class HTTPSender(Sender):
 class MulticastServer(threading.Thread):
     """Listens for multicast and put them in queue"""
 
-    def __init__(self, queue, intf):
+    def __init__(self, queue, devs):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.intf = intf
         self.running = threading.Event()
-        self.sock = MulticastServer.init_mcast(intf)
+        self.intfs = [MulticastServer.get_ip(d) for d in devs]
+        self.sock = MulticastServer.init_mcast() 
 
     # from http://code.activestate.com/recipes/439094-get-the-ip-address-
     # associated-with-a-network-inter/
     @staticmethod
-    def get_ip_address(ifname):
+    def get_ip(ifname):
         """Retreives the ip address of an interface (Linux only)"""
         ip = ""
+        print ifname
         if os.name != "nt":
             import fcntl
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -90,11 +96,10 @@ class MulticastServer(threading.Thread):
         return ip
 
     @staticmethod
-    def init_mcast(intf="127.0.0.1", port=MCAST_PORT, addr=MCAST_ADDR):
+    def init_mcast(intf=IP_ANY, port=MCAST_PORT, addr=MCAST_ADDR):
         """Initilizes a multicast socket"""
 
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
         try:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         except AttributeError as ex:
@@ -105,18 +110,14 @@ class MulticastServer(threading.Thread):
 
         s.bind(('', port))
 
-        print intf
-
-        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
-            socket.inet_aton(intf))
-
         s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP,
             socket.inet_aton(addr) + socket.inet_aton(intf))
 
         return s
 
     @staticmethod
-    def close_mcast(s, intf="127.0.0.1", addr=MCAST_ADDR):
+    def close_mcast(s, addr=MCAST_ADDR):
+        intf = s.getsockname()[0]
         s.setsockopt(socket.SOL_IP, socket.IP_DROP_MEMBERSHIP,
             socket.inet_aton(addr) + socket.inet_aton(intf))
         s.close()
@@ -128,21 +129,18 @@ class MulticastServer(threading.Thread):
         self.running.set() #set to true
         while self.running.is_set():
             data, addr = self.sock.recvfrom(1024)
+            self.queue.put((data, UDPSender(self.sock, self.intfs, addr)))
             print "MulticastServer: sender ", repr(addr), data
-            # we ignore our own requests
-            #if addr[0] != self.intf:
-            if True:
-                self.queue.put((data, UDPSender(self.sock, addr)))
 
     def stop(self):
         """Set run to false, and send an empty message"""
 
         self.running.clear() 
-        msender = UDPSender(self.sock, self.sock.getsockname())
+        msender = UDPSender(self.sock, self.intfs, self.sock.getsockname())
         msender.send("")
 
     def __del__(self):
-        self.close_mcast(self.sock, self.intf)
+        self.close_mcast(self.sock)
 
 class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     """Handles HTTP requests"""
@@ -238,10 +236,10 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 class HTTPThread(threading.Thread):
 
-    def __init__(self, queue, addr='127.0.0.1', port=8000):
+    def __init__(self, queue, addr=LOOP_ADDR, port=8000):
         threading.Thread.__init__(self)
         self.port = port
-        self.http = BaseHTTPServer.HTTPServer((addr, port), HTTPHandler)
+        self.http = BaseHTTPServer.HTTPServer(('0.0.0.0', port), HTTPHandler)
         self.http.queue = queue
         self.running = threading.Event()
 
@@ -258,11 +256,10 @@ class HTTPThread(threading.Thread):
 
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue, rqueue, sock, name):
+    def __init__(self, queue, rqueue, name):
         threading.Thread.__init__(self)
         self.queue = queue
         self.rqueue = rqueue
-        self.sock = sock
         self.name = name
 
     def run(self):
@@ -270,7 +267,7 @@ class WorkerThread(threading.Thread):
         self.litstore = LitterStore(self.name)
         while True:
             data, sender = self.queue.get()
-            if not sender:
+            if data == None or len(data) < 2:
                 # we close DB then break out of loop to stop thread
                 self.litstore.close()
                 break
@@ -283,17 +280,8 @@ class WorkerThread(threading.Thread):
                 # save method locally before sending it litterstore
                 # just in case it gets modified
                 method = request['m']
-                response = self.litstore.process(request)
-
-                if method == 'post' and isinstance(sender, HTTPSender):
-                    # if post from http it means this is a local post so
-                    # we neeed to broadcast via multicast
-                    addr = (MCAST_ADDR, MCAST_PORT)
-                    msender = UDPSender(self.sock, addr)
-                    self.rqueue.put((response, msender))
-                elif method != 'post' and isinstance(sender, UDPSender):
-                    # we send response back through sender of request
-                    self.rqueue.put((response, sender))
+                response = self.litstore.process(request, sender.dest)
+                self.rqueue.put((response, sender))
 
                 if isinstance(sender, HTTPSender):
                     # also send reply back to HTTP path directly from
@@ -344,9 +332,11 @@ class ResponseThread(threading.Thread):
 
 def usage():
     print "usage: ./litter.py [-i intf] [-n name] [-p port]"
+
+
 def main():
 
-    dev = "tapipop"
+    devs = []
     name = socket.gethostname()
     port = "8080";
 
@@ -358,7 +348,7 @@ def main():
 
     for o, a in opts:
         if o == "-i":
-            dev = a
+            devs.append(a)
         elif o == "-n":
             name = a
         elif o == "-p":
@@ -367,17 +357,16 @@ def main():
             usage()
             sys.exit()
 
-    intf = MulticastServer.get_ip_address(dev)
     queue = Queue.Queue()
     rqueue = Queue.Queue()
 
-    mserver = MulticastServer(queue, intf)
+    mserver = MulticastServer(queue, devs)
     mserver.start()
 
     rthread = ResponseThread(rqueue)
     rthread.start()
 
-    wthread = WorkerThread(queue, rqueue, mserver.sock, name)
+    wthread = WorkerThread(queue, rqueue, name)
     wthread.start()
 
     httpd = HTTPThread(queue, port=int(port))
@@ -387,7 +376,7 @@ def main():
     time.sleep(5)
 
     addr = (MCAST_ADDR, MCAST_PORT)
-    sender = UDPSender(mserver.sock, addr)
+    sender = UDPSender(mserver.sock, mserver.intfs, addr)
 
     pull_req = { 'm' : 'pull_req' }
     pull_data = json.dumps(pull_req)
