@@ -15,55 +15,10 @@ import logging
 import urllib
 import getopt
 from litterstore import LitterStore, StoreError
-
-MCAST_ADDR = "239.192.1.100"
-MCAST_PORT = 50000
-LOOP_ADDR = "127.0.0.1"
-IP_ANY = "0.0.0.0"
+from litterouter import *
 
 # Log everything, and send it to stderr.
 logging.basicConfig(level=logging.DEBUG)
-
-class Sender:
-    """Base class sender interface"""
-
-    dest = 'not assigned'
-
-    def send(self, data):
-        """Not implemented"""
-        raise Exception("Base class, no implementation")
-
-
-class UDPSender(Sender):
-    """Implements sender over UDP socket"""
-
-    def __init__(self, sock, intfs, dest):
-        self.sock = sock
-        self.dest = dest
-        self.intfs = intfs
-
-    def send(self, data):
-        """Simply sends over UDP socket"""
-        for intf in self.intfs:
-            self.sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
-                socket.inet_aton(intf))
-            self.sock.sendto(data, self.dest)
-
-class HTTPSender(Sender):
-    """Implements sender over HTTP protocol"""
-
-    def __init__(self, queue, dest):
-        self.queue = queue
-        self.dest = dest
-
-    def send(self, data):
-        """Send message by putting in queue for processing"""
-        self.queue.put((None, data))
-
-    def send_error(self, excep):
-        """Send error by putting in queue"""
-        self.queue.put((excep, None))
-
 
 class MulticastServer(threading.Thread):
     """Listens for multicast and put them in queue"""
@@ -73,7 +28,7 @@ class MulticastServer(threading.Thread):
         self.queue = queue
         self.running = threading.Event()
         self.intfs = [MulticastServer.get_ip(d) for d in devs]
-        self.sock = MulticastServer.init_mcast() 
+        self.sock = MulticastServer.init_mcast(self.intfs)
 
     # from http://code.activestate.com/recipes/439094-get-the-ip-address-
     # associated-with-a-network-inter/
@@ -81,7 +36,6 @@ class MulticastServer(threading.Thread):
     def get_ip(ifname):
         """Retreives the ip address of an interface (Linux only)"""
         ip = ""
-        print ifname
         if os.name != "nt":
             import fcntl
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -96,22 +50,22 @@ class MulticastServer(threading.Thread):
         return ip
 
     @staticmethod
-    def init_mcast(intf=IP_ANY, port=MCAST_PORT, addr=MCAST_ADDR):
+    def init_mcast(intfs=[], port=PORT, addr=MCAST_ADDR):
         """Initilizes a multicast socket"""
 
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        except AttributeError as ex:
-            logging.exception(ex)
 
-        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_TTL, 255)
-        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_LOOP, 1)
+        if os.name != "nt":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        #s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_TTL, 2)
+        #s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_LOOP, 1)
 
         s.bind(('', port))
 
-        s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP,
-            socket.inet_aton(addr) + socket.inet_aton(intf))
+        for intf in intfs:
+            s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP,
+                socket.inet_aton(addr) + socket.inet_aton(intf))
 
         return s
 
@@ -121,7 +75,6 @@ class MulticastServer(threading.Thread):
         s.setsockopt(socket.SOL_IP, socket.IP_DROP_MEMBERSHIP,
             socket.inet_aton(addr) + socket.inet_aton(intf))
         s.close()
-
 
     def run(self):
         """Waits in a loop for incoming packet then puts them in queue"""
@@ -136,8 +89,8 @@ class MulticastServer(threading.Thread):
         """Set run to false, and send an empty message"""
 
         self.running.clear() 
-        msender = UDPSender(self.sock, self.intfs, self.sock.getsockname())
-        msender.send("")
+        msender = UDPSender(self.sock)
+        msender.send("", (LOOP_ADDR, PORT))
 
     def __del__(self):
         self.close_mcast(self.sock)
@@ -179,10 +132,11 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
         print "HTTPHandler: %s " % request
         data = request['json'][0]
-        queue = Queue.Queue()
-        self.server.queue.put((data, HTTPSender(queue, self.client_address)))
-        # waits for response from workerthread
-        err, data = queue.get()
+        queue = Queue.Queue(1)
+        sender = HTTPSender(queue, self.client_address)
+        self.server.queue.put((data, sender), timeout=2)
+        # waits for response from workerthread for only 2 seconds
+        err, data = queue.get(timeout=2)
 
         if err:
             #Exception happened, TODO do something better here:
@@ -236,10 +190,10 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 class HTTPThread(threading.Thread):
 
-    def __init__(self, queue, addr=LOOP_ADDR, port=8000):
+    def __init__(self, queue, addr=LOOP_ADDR, port=8080):
         threading.Thread.__init__(self)
         self.port = port
-        self.http = BaseHTTPServer.HTTPServer(('0.0.0.0', port), HTTPHandler)
+        self.http = BaseHTTPServer.HTTPServer((IP_ANY, port), HTTPHandler)
         self.http.queue = queue
         self.running = threading.Event()
 
@@ -256,38 +210,36 @@ class HTTPThread(threading.Thread):
 
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue, rqueue, name):
+    def __init__(self, queue, name, sender):
         threading.Thread.__init__(self)
         self.queue = queue
-        self.rqueue = rqueue
         self.name = name
+        self.sender = sender
 
     def run(self):
         # SQL database has to be created in same thread
         self.litstore = LitterStore(self.name)
         while True:
             data, sender = self.queue.get()
-            if data == None or len(data) < 2:
+            if sender == None and data == None:
                 # we close DB then break out of loop to stop thread
                 self.litstore.close()
                 break
-            data = unicode(data, "utf-8")
-            print 'WorkerThread: %s : %s' % (sender.dest, data)
+
+            addr = None
+            if sender != None: addr = sender.dest
 
             try:
+                print "REQ: %s : %s" % (addr, data)
+                data = unicode(data, "utf-8")
                 request = json.loads(data)
+                self.forward(request)
 
                 # save method locally before sending it litterstore
                 # just in case it gets modified
-                method = request['m']
-                response = self.litstore.process(request, sender.dest)
-                self.rqueue.put((response, sender))
-
-                if isinstance(sender, HTTPSender):
-                    # also send reply back to HTTP path directly from
-                    # thread, since it's put in queue for HTTP thread
-                    data = json.dumps(response, ensure_ascii=False)
-                    sender.send(data)
+                response = self.litstore.process(request, repr(addr))
+                print "REP: %s : %s" % (addr, response)
+                self.send(response, sender)
 
             except StoreError as ie:
                 if str(ie) == "column hashid is not unique":
@@ -302,32 +254,31 @@ class WorkerThread(threading.Thread):
                     sender.send_error(ex)
                 logging.exception(ex)
 
+    def forward(self, request):
+        ttl = request.get('ttl', 1) - 1
+        request['ttl'] = ttl
+        if ttl > 0:
+            data = json.dumps(request, ensure_ascii=False)
+            self.sender.send(data.encode("utf-8"))
+
+    def send(self, response, sender):
+
+        if isinstance(sender, HTTPSender):
+            # also send reply back to HTTP path directly from
+            # thread, since it's put in queue for HTTP thread
+            data = json.dumps(response, ensure_ascii=False)
+            sender.send(data)
+
+        if sender == None or isinstance(sender, HTTPSender):
+            sender = self.sender
+
+        for reply in response:
+            data = json.dumps(reply, ensure_ascii=False)
+            sender.send(data.encode("utf-8"))
+            time.sleep(0.01)
+
     def stop(self):
         self.queue.put((None,None))
-
-
-class ResponseThread(threading.Thread):
-
-    def __init__(self, rqueue):
-        threading.Thread.__init__(self)
-        self.rqueue = rqueue
-
-    def run(self):
-        while True:
-            response, sender = self.rqueue.get()
-
-            if None == sender:
-                # time to exit loop and thread
-                break
-
-            for post in response:
-                data = json.dumps(post, ensure_ascii=False)
-                print 'ResponseThread: %s : %s' % (sender.dest, data)
-                sender.send(data.encode("utf-8"))
-                time.sleep(0.1)
-
-    def stop(self):
-        self.rqueue.put((None, None))
 
 
 def usage():
@@ -336,7 +287,7 @@ def usage():
 
 def main():
 
-    devs = []
+    devs = ['lo']
     name = socket.gethostname()
     port = "8080";
 
@@ -357,16 +308,12 @@ def main():
             usage()
             sys.exit()
 
-    queue = Queue.Queue()
-    rqueue = Queue.Queue()
+    queue = Queue.Queue(100)
 
     mserver = MulticastServer(queue, devs)
     mserver.start()
 
-    rthread = ResponseThread(rqueue)
-    rthread.start()
-
-    wthread = WorkerThread(queue, rqueue, name)
+    wthread = WorkerThread(queue, name, UDPSender(mserver.sock, mserver.intfs))
     wthread.start()
 
     httpd = HTTPThread(queue, port=int(port))
@@ -375,27 +322,22 @@ def main():
     # wait a few seconds for threads to setup
     time.sleep(5)
 
-    addr = (MCAST_ADDR, MCAST_PORT)
-    sender = UDPSender(mserver.sock, mserver.intfs, addr)
-
-    pull_req = { 'm' : 'pull_req' }
+    pull_req = { 'm' : 'pull_req'}
     pull_data = json.dumps(pull_req)
 
-    gap_req = { 'm' : 'gap_req' }
+    gap_req = { 'm' : 'gap_req'}
     gap_data = json.dumps(gap_req)
 
     try:
         while True:
-            queue.put((pull_data, sender))
-            queue.put((gap_data, sender))
+            queue.put((pull_data, None))
+            queue.put((gap_data, None))
             time.sleep(60)
     except:
         #Control-C will put us here, let's stop the other threads:
         httpd.stop()
         mserver.stop()
         wthread.stop()
-        rthread.stop()
-
 
 if __name__ == '__main__':
     main()

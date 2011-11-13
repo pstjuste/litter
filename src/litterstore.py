@@ -50,8 +50,7 @@ class LitterStore:
             "rxtime NUM, hashid TEXT, PRIMARY KEY(hashid ASC))")
 
         self.__db_call("CREATE TABLE IF NOT EXISTS friends "
-            "(uid TEXT, fid TEXT, txtime NUM, "
-            "PRIMARY KEY(uid, fid))")
+            "(uid TEXT, fid TEXT, txtime NUM PRIMARY KEY(uid, fid))")
 
         cid = self.__db_call("SELECT MAX(postid) FROM posts WHERE uid == ?",
             (self.uid, ))
@@ -66,11 +65,12 @@ class LitterStore:
         if len(results) < 1:
             msg = "INSERT INTO friends (uid, fid, txtime) VALUES (?, ?, ?)"
             self.__db_call(msg, (uid, fid, txtime))
+
         elif results[0][0] < txtime:
             msg = "UPDATE friends SET txtime = ? WHERE uid == ? and fid == ?"
             self.__db_call(msg, (txtime, uid, fid))
 
-    def __post(self, msg, uid=None, txtime = None, postid = -1, hashid=None):
+    def __post(self, msg, uid=None, txtime=None, postid=-1, hashid=None):
         rxtime = 0
 
         if uid == None:
@@ -116,20 +116,20 @@ class LitterStore:
         return self.__db_call(msg[0], msg[1])
 
     def __pull_req(self):
-        request = { 'm' : 'pull_rcv', 'uid' : self.uid }
+        request = { 'm' : 'pull_rcv'}
         msg = "SELECT fid, txtime FROM friends WHERE uid == ?"
         request['friends'] = []
         request['friends'].extend(self.__db_call(msg, (self.uid,)))
         return request
 
-    def __pull_rcv(self, uid, friends = None):
+    def __pull_rcv(self, uid, friends=None):
         results = []
         self.__update_time(self.uid, uid, 0)
 
         if friends != None and len(friends) == 0:
             # if friends is empty, this is a new node, so reply your posts
             results = self.__get(self.uid)
-        else:
+        elif friends != None:
             for fid, txtime in friends:
                 self.__update_time(uid, fid, txtime)
                 results.extend(self.__get(fid, txtime))
@@ -182,7 +182,7 @@ class LitterStore:
 
         # only return dictionary if gaps are found
         if len(gap_list) > 0:
-            request = {'m': 'gap_rcv', 'uid' : self.uid, 'friends': gap_list}
+            request = {'m': 'gap_rcv', 'friends': gap_list}
 
         return request
 
@@ -198,37 +198,37 @@ class LitterStore:
 
         return results
 
-    def __process_results(self, response, meth, addr, ttl):
+    def __process_results(self, response, meth, fid, ttl):
         results = []
 
-        if ttl != None and ttl > 0:
-            if isinstance(response, list):
-                for post in response:
-                    kwargs = {}
-                    kwargs['uid'] = post[0]
-                    kwargs['postid'] = post[1]
-                    kwargs['txtime'] = post[2]
-                    kwargs['msg'] = post[3]
-                    kwargs['hashid'] = post[4]
-                    kwargs['m'] = 'post'
-                    kwargs['ttl'] = ttl - 1
-                    kwargs['addr'] = addr
-                    results.append(kwargs)
-            elif isinstance(response, dict):
-                results.append(response)
+        if isinstance(response, list):
+            for post in response:
+                kwargs = {}
+                kwargs['uid'] = post[0]
+                kwargs['postid'] = post[1]
+                kwargs['txtime'] = post[2]
+                kwargs['msg'] = post[3]
+                kwargs['hashid'] = post[4]
+                kwargs['m'] = 'post'
+                kwargs['fid'] = fid
+                kwargs['ttl'] = ttl
+                results.append(kwargs)
+        elif isinstance(response, dict):
+            response['uid'] = self.uid
+            response['fid'] = fid
+            response['ttl'] = ttl
+            results.append(response)
 
         return results
 
-    def process(self, request, addr='addr'):
+    def process(self, request):
         results = []
         meth = request.pop('m', None)
         ttl = request.pop('ttl', 1)
-        addr = request.pop('addr', addr)
-        uid = request.get('uid', None)
+        fid = request.get('uid', None)
 
         # we do not process our own requests
-        if uid != None and uid == self.uid:
-            return results
+        if uid != None and uid == self.uid: return results
 
         if meth == 'post':
             results = self.__post(**request)
@@ -243,7 +243,7 @@ class LitterStore:
         elif meth == 'gap_rcv':
             results = self.__gap_rcv(**request)
 
-        return self.__process_results(results, meth, addr, ttl)
+        return self.__process_results(results, meth, fid, ttl)
 
     def close(self):
         self.con.close()
