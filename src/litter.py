@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
-import socket
 import os
+import socket
 import struct
 import time
 import sys
@@ -15,7 +15,7 @@ import logging
 import urllib
 import getopt
 from litterstore import LitterStore, StoreError
-from litterouter import *
+from litterrouter import *
 
 # Log everything, and send it to stderr.
 logging.basicConfig(level=logging.DEBUG)
@@ -58,8 +58,8 @@ class MulticastServer(threading.Thread):
         if os.name != "nt":
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        #s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_TTL, 2)
-        #s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_LOOP, 1)
+        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_TTL, 2)
+        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_LOOP, 0)
 
         s.bind(('', port))
 
@@ -210,11 +210,11 @@ class HTTPThread(threading.Thread):
 
 class WorkerThread(threading.Thread):
 
-    def __init__(self, queue, name, sender):
+    def __init__(self, queue, name, router):
         threading.Thread.__init__(self)
         self.queue = queue
         self.name = name
-        self.sender = sender
+        self.router = router
 
     def run(self):
         # SQL database has to be created in same thread
@@ -226,20 +226,23 @@ class WorkerThread(threading.Thread):
                 self.litstore.close()
                 break
 
-            addr = None
-            if sender != None: addr = sender.dest
-
             try:
-                print "REQ: %s : %s" % (addr, data)
-                data = unicode(data, "utf-8")
-                request = json.loads(data)
-                self.forward(request)
+                print "REQ: %s : %s" % (sender, data)
+
+                if not isinstance(data, dict):
+                    data = unicode(data, "utf-8")
+                    request = json.loads(data)
+                else:
+                    request = data
 
                 # save method locally before sending it litterstore
                 # just in case it gets modified
-                response = self.litstore.process(request, repr(addr))
-                print "REP: %s : %s" % (addr, response)
-                self.send(response, sender)
+                response = self.litstore.process(request)
+                print "REP: %s : %s" % (sender, response)
+                #self.send(response, sender)
+
+                # TODO - Temporary testing
+                self.send((request,), sender)
 
             except StoreError as ie:
                 if str(ie) == "column hashid is not unique":
@@ -254,14 +257,9 @@ class WorkerThread(threading.Thread):
                     sender.send_error(ex)
                 logging.exception(ex)
 
-    def forward(self, request):
-        ttl = request.get('ttl', 1) - 1
-        request['ttl'] = ttl
-        if ttl > 0:
-            data = json.dumps(request, ensure_ascii=False)
-            self.sender.send(data.encode("utf-8"))
-
     def send(self, response, sender):
+
+        addr = None if sender == None else sender.dest
 
         if isinstance(sender, HTTPSender):
             # also send reply back to HTTP path directly from
@@ -269,12 +267,8 @@ class WorkerThread(threading.Thread):
             data = json.dumps(response, ensure_ascii=False)
             sender.send(data)
 
-        if sender == None or isinstance(sender, HTTPSender):
-            sender = self.sender
-
         for reply in response:
-            data = json.dumps(reply, ensure_ascii=False)
-            sender.send(data.encode("utf-8"))
+            self.router.send(reply, sender, addr)
             time.sleep(0.01)
 
     def stop(self):
@@ -313,7 +307,9 @@ def main():
     mserver = MulticastServer(queue, devs)
     mserver.start()
 
-    wthread = WorkerThread(queue, name, UDPSender(mserver.sock, mserver.intfs))
+    router = LitterRouter(mserver.sock, mserver.intfs, name)
+
+    wthread = WorkerThread(queue, name, router)
     wthread.start()
 
     httpd = HTTPThread(queue, port=int(port))
@@ -322,17 +318,20 @@ def main():
     # wait a few seconds for threads to setup
     time.sleep(5)
 
-    pull_req = { 'm' : 'pull_req'}
+    pull_req = { 'm' : 'pull', 'type':'req'}
     pull_data = json.dumps(pull_req)
 
-    gap_req = { 'm' : 'gap_req'}
+    gap_req = { 'm' : 'gap', 'type':'req'}
     gap_data = json.dumps(gap_req)
 
     try:
         while True:
-            queue.put((pull_data, None))
-            queue.put((gap_data, None))
-            time.sleep(60)
+            #queue.put((pull_data, None))
+            #queue.put((gap_data, None))
+            #time.sleep(60000)
+            user_input = raw_input('>>')
+            data = eval(user_input)
+            queue.put((data, None))
     except:
         #Control-C will put us here, let's stop the other threads:
         httpd.stop()

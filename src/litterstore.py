@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 
-import unittest
 import sqlite3 
 import time
 import sys
 import random
 import hashlib
 import socket
+import unittest
 
 class StoreError(Exception):
     pass
@@ -50,7 +50,7 @@ class LitterStore:
             "rxtime NUM, hashid TEXT, PRIMARY KEY(hashid ASC))")
 
         self.__db_call("CREATE TABLE IF NOT EXISTS friends "
-            "(uid TEXT, fid TEXT, txtime NUM PRIMARY KEY(uid, fid))")
+            "(uid TEXT, fid TEXT, txtime NUM, PRIMARY KEY(uid, fid))")
 
         cid = self.__db_call("SELECT MAX(postid) FROM posts WHERE uid == ?",
             (self.uid, ))
@@ -115,14 +115,14 @@ class LitterStore:
 
         return self.__db_call(msg[0], msg[1])
 
-    def __pull_req(self):
-        request = { 'm' : 'pull_rcv'}
+    def __gen_pull(self):
+        request = { 'm' : 'pull'}
         msg = "SELECT fid, txtime FROM friends WHERE uid == ?"
         request['friends'] = []
         request['friends'].extend(self.__db_call(msg, (self.uid,)))
         return request
 
-    def __pull_rcv(self, uid, friends=None):
+    def __pull(self, uid, friends=None):
         results = []
         self.__update_time(self.uid, uid, 0)
 
@@ -176,17 +176,17 @@ class LitterStore:
 
         return results;
 
-    def __gap_req(self):
+    def __gen_gap(self):
         request = []
         gap_list = self.__find_all_gaps()
 
         # only return dictionary if gaps are found
         if len(gap_list) > 0:
-            request = {'m': 'gap_rcv', 'friends': gap_list}
+            request = {'m': 'gap', 'friends': gap_list}
 
         return request
 
-    def __gap_rcv(self, uid = None, friends = None):
+    def __gap(self, uid, friends = None):
         results = []
         self.__update_time(self.uid, uid, 0)
 
@@ -198,8 +198,20 @@ class LitterStore:
 
         return results
 
-    def __process_results(self, response, meth, fid, ttl):
+    def __set_dest_header(self, request):
+        pass
+
+    def __process_results(self, request, response):
         results = []
+        fid = request.get('from', 'any')
+        ttl = request.get('ttl', 4)
+        m_type = request.get('type', 'req')
+
+        if m_type == 'req':
+            m_id = random.random()
+            m_type = 'rep'
+        else:
+            m_id = request.get('id', None)
 
         if isinstance(response, list):
             for post in response:
@@ -210,40 +222,57 @@ class LitterStore:
                 kwargs['msg'] = post[3]
                 kwargs['hashid'] = post[4]
                 kwargs['m'] = 'post'
-                kwargs['fid'] = fid
+                kwargs['to'] = fid
+                kwargs['from'] = self.uid
                 kwargs['ttl'] = ttl
+                kwargs['id'] = m_id
+                kwargs['type'] = m_type
                 results.append(kwargs)
         elif isinstance(response, dict):
-            response['uid'] = self.uid
-            response['fid'] = fid
+            response['from'] = self.uid
+            response['to'] = fid
             response['ttl'] = ttl
+            response['id'] = m_id
+            response['type'] = m_type
             results.append(response)
 
         return results
 
     def process(self, request):
         results = []
-        meth = request.pop('m', None)
-        ttl = request.pop('ttl', 1)
-        fid = request.get('uid', None)
-
-        # we do not process our own requests
-        if uid != None and uid == self.uid: return results
+        meth = request.get('m', None)
 
         if meth == 'post':
-            results = self.__post(**request)
+            kwargs = {}
+            kwargs['msg'] = request.get('msg')
+            kwargs['uid'] = request.get('uid', None)
+            kwargs['txtime'] = request.get('txtime', None)
+            kwargs['postid'] = request.get('postid', -1)
+            kwargs['hashid'] = request.get('hashid', None)
+            results = self.__post(**kwargs)
         elif meth == 'get':
-            results = self.__get(**request)
-        elif meth == 'pull_req':
-            results = self.__pull_req()
-        elif meth == 'pull_rcv':
-            results = self.__pull_rcv(**request)
-        elif meth == 'gap_req':
-            results = self.__gap_req()
-        elif meth == 'gap_rcv':
-            results = self.__gap_rcv(**request)
+            kwargs = {}
+            kwargs['uid'] = request.get('uid', None)
+            kwargs['begin'] = request.get('begin', 0)
+            kwargs['until'] = request.get('until', sys.maxint)
+            kwargs['limit'] = request.get('limit', 10)
+            results = self.__get(**kwargs)
+        elif meth == 'gen_pull':
+            results = self.__gen_pull()
+        elif meth == 'pull':
+            kwargs = {}
+            kwargs['uid'] = request.get('uid')
+            kwargs['friends'] = request.get('friends', None)
+            results = self.__pull(**kwargs)
+        elif meth == 'gen_gap':
+            results = self.__gen_gap()
+        elif meth == 'gap':
+            kwargs = {}
+            kwargs['uid'] = request.get('uid')
+            kwargs['friends'] = request.get('friends', None)
+            results = self.__gap(**kwargs)
 
-        return self.__process_results(results, meth, fid, ttl)
+        return self.__process_results(request, results)
 
     def close(self):
         self.con.close()
@@ -302,7 +331,6 @@ class LitterUnitSingle(unittest.TestCase):
         results = self.litter.process(request)
         self.assertEqual(results[0]['uid'], 'luda')
 
-
         request = { 'm' : 'get_friends'}
         results = self.litter.process(request)
         print results
@@ -322,7 +350,7 @@ class LitterUnitDouble(unittest.TestCase):
         self.litter_b = None
 
     def test_pull(self):
-        request_a = {'m' : 'pull_req'}
+        request_a = {'m' : 'gen_pull'}
         results_a = self.litter_a.process(request_a)
 
         request_b = results_a[0]
@@ -334,7 +362,7 @@ class LitterUnitDouble(unittest.TestCase):
         request_a = {'m': 'post', 'msg' : msg}
         results_a = self.litter_a.process(request_a)
 
-        request_b = {'m': 'pull_req'}
+        request_b = {'m': 'gen_pull'}
         results_b = self.litter_b.process(request_b)
 
         request_a = results_b[0]
@@ -347,7 +375,7 @@ class LitterUnitDouble(unittest.TestCase):
         self.assertEqual(results_b[0]['msg'], msg)
 
     def test_gap(self):
-        request_a = {'m' : 'gap_req'}
+        request_a = {'m' : 'gen_gap'}
         results_a = self.litter_a.process(request_a)
         self.assertEqual(len(results_a), 0)
         self.assertTrue(isinstance(results_a, list))
@@ -363,9 +391,9 @@ class LitterUnitDouble(unittest.TestCase):
         request_b = results_a[0]
         results_b = self.litter_b.process(request_b)
 
-        request_b = {'m': 'gap_req'}
+        request_b = {'m': 'gen_gap'}
         results_b = self.litter_b.process(request_b)
-        self.assertEqual(results_b[0]['m'], 'gap_rcv')
+        self.assertEqual(results_b[0]['m'], 'gap')
         self.assertEqual(results_b[0]['friends'].keys()[0], 'usera')
 
         request_a = results_b[0]
@@ -376,4 +404,5 @@ class LitterUnitDouble(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    import unittest
     unittest.main()
