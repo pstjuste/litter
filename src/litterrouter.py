@@ -4,6 +4,9 @@ import unittest
 import json
 import socket
 import random
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 MCAST_ADDR = "239.192.1.100"
 PORT = 50000
@@ -24,71 +27,101 @@ class UDPSender(Sender):
     """Implements sender over UDP socket"""
 
     def __init__(self, sock, intfs=None, dest=None):
-        self.sock = sock
-        self.dest = dest
-        self.intfs = intfs
+        self.__sock = sock
+        self.__dest = dest
+        self.__intfs = intfs
+
+    @property
+    def dest(self):
+        return self.__dest
+
+    def __repr__(self):
+        return "UDP Sender: %s" % (self.dest,)
 
     def send(self, data, dest=None):
-        """Simply sends over UDP socket"""
+        """Sends over UDP socket, if no destination address is found,
+           multicast address is used"""
 
-        if not isinstance(self.sock, socket.socket):
-            return None
-
-        if dest == None and self.dest == None and self.intfs != None:
+        if dest == None and self.__dest == None and self.__intfs != None:
             dest = (MCAST_ADDR, PORT)
 
-            for intf in self.intfs:
-                self.sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
-                                     socket.inet_aton(intf))
-                self.sock.sendto(data, dest)
+            for intf in self.__intfs:
+                self.__sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
+                                       socket.inet_aton(intf))
+                self.__sock.sendto(data, dest)
 
-        elif dest == None:
-            dest = self.dest
+        elif dest == None and self.__dest != None:
+            dest = self.__dest
+            self.__sock.sendto(data, dest)
 
-        self.sock.sendto(data, dest)
-        print 'UDP send : %s : %s' % (dest, data)
+        elif dest != None:
+            self.__sock.sendto(data, dest)
+
+        logging.debug('UDP send : %s : %s' % (dest, data))
+        return dest
 
 
 class HTTPSender(Sender):
     """Implements sender over HTTP protocol"""
 
     def __init__(self, queue, dest=None):
-        self.queue = queue
-        self.dest = dest
+        self.__queue = queue
+        self.__dest = dest
+
+    @property
+    def dest(self):
+        return self.__dest
+
+    def __repr__(self):
+        return "HTTP Sender: %s" % (self.dest,)
 
     def send(self, data, dest=None):
         """Send message by putting in queue for processing"""
-        self.queue.put((None, data))
-        print 'HTTP send : %s : %s' % (self.dest, data)
+        self.__queue.put((None, data))
+        logging.debug('HTTP send : %s : %s' % (self.dest, data))
 
     def send_error(self, excep):
         """Send error by putting in queue"""
-        self.queue.put((excep, None))
+        self.__queue.put((excep, None))
+
+
+
+class RouterError(Exception):
+    """Used to raise litterstore error"""
+
+    def __init__(self, msg):
+        self.msg = msg
 
 
 class LitterRouter:
 
     def __init__(self, sock, intfs, uid):
-        self.sock = sock
-        self.intfs = intfs
-        self.uid = uid
-        self.addrs = []
-        self.uid_to_addr = {}
-        self.mid_to_addr = {}
+        self.__sock = sock
+        self.__intfs = intfs
+        self.__uid = uid
+        self.__addrs = []
+        self.__uid_to_addr = {}
+        self.__mid_to_addr = {}
 
 
     def __get_bcast_sender(self):
-        return UDPSender(self.sock, self.intfs)
+        logging.debug('GET BCAST')
+        return UDPSender(self.__sock, self.__intfs)
 
 
     def __get_rand_sender(self):
         sender = None
-        length = len(self.addrs)
+        length = len(self.__addrs)
 
-        if length != 0:
-            rand_idx = random.randint(1, length) - 1
-            next_hop = self.addrs[rand_idx]
-            sender = UDPSender(self.sock, dest=next_hop)
+        if length < 1:
+            raise RouterError("empty routing table")
+
+        if length >= 1:
+            rand_idx = random.randint(0, length-1)
+            next_hop = self.__addrs[rand_idx]
+            sender = UDPSender(self.__sock, dest=next_hop)
+
+        logging.debug('GET RND: %s' % (sender,))
 
         return sender
 
@@ -97,133 +130,247 @@ class LitterRouter:
 
         sender = None
 
-        if uid != None and uid in self.uid_to_addr:
-            addr = self.uid_to_addr[uid]
-            sender = UDPSender(self.sock, dest=addr)
-        elif mid != None and mid in self.mid_to_addr:
-            addr = self.mid_to_addr[mid]
-            sender = UDPSender(self.sock, dest=addr)
+        if mid != None and mid in self.__mid_to_addr:
+            addr = self.__mid_to_addr[mid]
+            sender = UDPSender(self.__sock, dest=addr)
+            logging.debug('MID %s' % (sender,))
+        elif uid != None and uid in self.__uid_to_addr:
+            addr = self.__uid_to_addr[uid]
+            sender = UDPSender(self.__sock, dest=addr)
+            logging.debug('UID %s' % (sender,))
         else:
-            sender = self.__get_rand_sender()
+            raise RouterError("uid or mid not found")
 
         return sender
 
 
     def __add_route(self, headers, addr):
 
-        print 'ADD ROUTE : %s : %s' % (headers, addr)
+        logging.debug('ADD ROUTE : %s : %s' % (headers, addr))
 
         if addr != None and not addr[0].startswith('127'):
-            self.uid_to_addr[headers['hfrom']] = addr
+            self.__uid_to_addr[headers['hfrom']] = addr
 
             if headers['htype'] == 'req': 
-                self.mid_to_addr[headers['hid']] = addr
+                self.__mid_to_addr[headers['hid']] = addr
 
-            if addr not in self.addrs: 
-                self.addrs.append(addr)
+            if addr not in self.__addrs: 
+                self.__addrs.append(addr)
 
             return True
 
-        return False
+        else:
+            return False
 
 
     def __should_send(self, hto, hfrom, hid, htype, httl):
-        result = httl >= 1 and hto != self.uid
-        if htype == 'req': result = result and hid not in self.mid_to_addr
+        result = httl >= 0 and hto != self.__uid
+        if htype == 'req': result = result and hid not in self.__mid_to_addr
         return result
 
 
     def send(self, data, sender=None, addr=None):
 
-        print 'SEND : %s' % (data,)
+        logging.debug('SEND : %s %s' % (sender, data))
 
+        new_sender = sender
         headers = data.get('headers', None)
 
         if headers != None and self.__should_send(**headers):
-            self.__add_route(headers, addr)
 
-            # TODO - cleanup this logic
             if headers['hto'] == 'any' and headers['htype'] == 'req':
-                sender = self.__get_rand_sender()
+                new_sender = self.__get_rand_sender()
             elif headers['hto'] == 'all' and headers['htype'] == 'req':
-                sender = self.__get_bcast_sender()
-            elif headers['htype'] == 'req':
-                sender = self.__get_sender(headers['hto'])
-            elif headers['htype'] == 'rep' and headers['hto'] != 'any':
-                sender = self.__get_sender(headers['hid'])
+                new_sender = self.__get_bcast_sender()
+            else:
+                new_sender = self.__get_sender(uid = headers['hto'], 
+                    mid = headers['hid'])
 
             # it's important to decrement ttl
             headers['httl'] -= 1
 
-            if isinstance(sender, Sender):
+            if isinstance(new_sender, Sender) and headers['httl'] >= 0:
                 msg = json.dumps(data, ensure_ascii=False).encode("utf-8")
-                sender.send(msg)
-                print 'SENT : %s : %s' % (data, sender.dest)
-                return True
+                new_sender.send(msg)
 
-        return False
+        # always update route even if we dont foward packet
+        if isinstance(sender, Sender) and headers != None:
+            self.__add_route(headers, sender.dest)
+
+        return new_sender
 
 
     def should_process(self, data, sender=None):
 
+        logging.debug('SPROCESS : %s %s' % (sender, data))
+
         headers = data.get('headers', None)
-        if headers == None: return True
 
-        if isinstance(sender, Sender) and sender.dest[0] in self.intfs: 
+        if isinstance(sender, Sender) and sender.dest[0] in self.__intfs: 
             return False
-        elif self.__should_send(**headers):
-            self.send(data, sender, sender.dest)
-            return True
+        elif isinstance(headers, dict) and headers['htype'] == 'req' and \
+            headers['hid'] in self.__mid_to_addr: return False
+        elif headers != None:
+            self.send(data, sender)
+            #restore ttl since send decrements it
+            headers['httl'] += 1
 
-        return False
+        return True
+
+
+class MockSocket:
+
+    def setsockopt(self, opt, mcastif, intf):
+        pass
+
+    def sendto(self, data, dest):
+        pass
+
+
+class UDPSenderTest(unittest.TestCase):
+
+    def test(self):
+        sock = MockSocket()
+
+        # case 1
+        sender_a = UDPSender(sock)
+        self.assertEqual(sender_a.send(''), None)
+
+        # case 2
+        dest_a = ('addr1',1234)
+        self.assertEqual(sender_a.send('',dest_a), dest_a)
+
+        # case 3
+        dest_b = ('addr2', 1234)
+        sender_b = UDPSender(sock, dest=dest_a)
+        self.assertEqual(sender_b.send(''), dest_a)
+
+        # case 5
+        self.assertEqual(sender_b.send('', dest_b), dest_b)
+
+        # case 6
+        sender_c = UDPSender(sock, ['127.0.0.1'])
+        mcast = (MCAST_ADDR, PORT)
+        self.assertEqual(sender_c.send(''), mcast)
+
+        # case 7
+        self.assertEqual(sender_c.send('',dest_a), dest_a)
 
 
 class LitterRouterTest(unittest.TestCase):
 
     def setUp(self):
-        sock = 1
-        intfs = ['intf1', 'intf2']
-        self.router = LitterRouter(sock, intfs, 'uid1')
+        self.sock = MockSocket()
+        self.intfs = ['127.0.0.1', '0.0.0.0']
+        self.router_a = LitterRouter(self.sock, self.intfs, 'user_a')
+        self.router_b = LitterRouter(self.sock, self.intfs, 'user_b')
 
     def tearDown(self):
         pass
 
     def test(self):
-        result = self.router.should_process({})
+        result = self.router_a.should_process({})
         self.assertEqual(result, True)
 
+        bcast_addr = (MCAST_ADDR, PORT)
         headers = {}
-        headers['hto'] = 'uid2'
-        headers['hfrom'] = 'uid1'
+        headers['hto'] = 'user_b'
+        headers['hfrom'] = 'user_a'
         headers['hid'] = 'id1'
         headers['htype'] = 'req'
-        headers['httl'] = 2
+        headers['httl'] = -1
 
         data = {}
         data['headers'] = headers
 
-        sender = Sender()
-        sender.dest = ('intf1','port')
+        # case 1
+        self.assertEqual(self.router_a.send(data), None)
 
-        result = self.router.should_process(data, sender)
-        self.assertEqual(result, False)
+        # case 2
+        headers['httl'] = 1
+        headers['hto'] = 'user_a'
+        self.assertEqual(self.router_a.send(data), None)
 
-        sender.dest = ('ip1', 'port1')
-        result = self.router.should_process(data, sender)
-        self.assertEqual(result, True)
+        # case 3
+        headers['hto'] = 'any'
+        headers['httl'] = 1
+        self.assertRaises(RouterError, self.router_a.send, data)
 
-        result = self.router.send({})
-        self.assertEqual(result, False)
+        # case 4a
+        headers['httl'] = 1
+        sender_a = UDPSender(self.sock, dest="192.168.0.101");
+        self.assertRaises(RouterError, self.router_a.send, data)
 
-        headers['httl'] = 0
-        result = self.router.send(data, None)
-        self.assertEqual(result, False)
+        # case 4b
+        headers['hid'] = 'id3'
+        self.assertRaises(RouterError, self.router_a.send, data,
+            sender=sender_a)
 
+        # case 5
+        headers['hto'] = 'all'
+        headers['httl'] = 1
+        self.assertEqual(self.router_a.send(data).dest, None)
+
+        # case 6
         headers['httl'] = 1
         headers['hid'] = 'id2'
-        result = self.router.send(data, None)
-        self.assertEqual(result, True)
+        self.assertEqual(self.router_a.send(data).dest, None)
 
+        # case 7
+        headers['httl'] = 1
+        headers['htype'] = 'rep'
+        headers['hid'] = 'id1'
+        self.assertRaises(RouterError, self.router_a.send, data)
+
+        # case 8
+        headers['httl'] = 1
+        headers['htype'] = 'rep'
+        headers['hid'] = 'id2'
+        self.assertRaises(RouterError, self.router_a.send, data)
+
+        #case 9
+        headers['httl'] = 1
+        headers['htype'] = 'req'
+        headers['hto'] = 'any'
+        self.assertRaises(RouterError, self.router_b.send, data, sender = sender_a)
+
+        #case 10
+        headers['httl'] = 1
+        headers['htype'] = 'rep'
+        headers['hto'] = 'user_a'
+        self.assertRaises(RouterError, self.router_b.send, data)
+
+        #case 11
+        headers['httl'] = 1
+        headers['htype'] = 'rep'
+        self.assertRaises(RouterError, self.router_b.send, data)
+
+        #case 12
+        self.assertEqual(self.router_a.should_process({}), True)
+
+        #case 13
+        sender_b = UDPSender(self.sock, dest=('127.0.0.1',PORT))
+        self.assertEqual(self.router_a.should_process(data, sender_b), False)
+        
+        #case 14
+        headers['htype'] = 'req'
+        headers['httl'] = 2
+        headers['hto'] = 'all'
+        headers['hfrom'] = 'user_a'
+        headers['hid'] = 'id14'
+        sender_c = UDPSender(self.sock, dest=('172.31.34.21',PORT))
+        self.assertEqual(self.router_a.send(data, sender_c).dest, None)
+        self.assertEqual(self.router_a.should_process(data, sender_c), False)
+
+        #case 15
+        headers['httl'] = 1
+        headers['hid'] = 'id15'
+        self.assertEqual(self.router_a.should_process(data, sender_c), True)
+
+        #case 16
+        sender_d = UDPSender(self.sock, dest=('182.231.11.2',PORT))
+        self.assertEqual(self.router_a.send({},sender=sender_c), sender_c)
+        
 
 if __name__ == '__main__':
     unittest.main()

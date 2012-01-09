@@ -7,18 +7,22 @@ import random
 import hashlib
 import socket
 import unittest
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 class StoreError(Exception):
-    pass
+    """Used to raise litterstore error"""
+
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __str__(self):
+        return repr(self.msg)
+
 
 class LitterStore:
     """Handles storage and processes requests"""
-
-    def __init__(self, uid = None, test = False):
-        self.uid = uid if uid != None else socket.gethostname()
-        self.con = sqlite3.connect(":memory:" if test else self.uid + ".db")
-        self.nextid = 1
-        self.__init_db()
 
     @staticmethod
     def cal_hash(uid, msg, txtime, postid):
@@ -30,19 +34,35 @@ class LitterStore:
         shash.update(tohash)
         return shash.hexdigest()
 
-    def __db_call(self, action, params = None):
-        print "dbcall -- %s %s" % (action, params)
+
+    def __init__(self, uid=None, test=False):
+        self.uid = uid if uid != None else socket.gethostname()
+        self.con = sqlite3.connect(":memory:" if test else self.uid + ".db")
+        self.nextid = 1
+        self.__init_db()
+
+
+    def __db_call(self, action, params=None):
+
+        logging.debug("dbcall -- %s %s" % (action, params))
+
         cur = self.con.cursor()
 
-        if params != None:
-            cur.execute(action, params) 
-        else:
-            cur.execute(action)
+        try:
+            if params != None:
+                cur.execute(action, params) 
+            else:
+                cur.execute(action)
 
-        result = cur.fetchall()
-        self.con.commit()
-        cur.close()
+            result = cur.fetchall()
+            self.con.commit()
+            cur.close()
+
+        except sqlite3.IntegrityError as ie:
+            raise StoreError(str(ie))
+
         return result
+
 
     def __init_db(self):
         self.__db_call("CREATE TABLE IF NOT EXISTS posts "
@@ -55,10 +75,11 @@ class LitterStore:
         cid = self.__db_call("SELECT MAX(postid) FROM posts WHERE uid == ?",
             (self.uid, ))
 
-        if cid[0][0] != None:
+        if cid[0][0] != None: 
             self.nextid = cid[0][0] + 1
 
-    def __update_time(self, uid, fid, txtime = 0):
+
+    def __update_time(self, uid, fid, txtime=0):
         msg = "SELECT txtime FROM friends WHERE uid == ? and fid == ?"
         results = self.__db_call(msg,(uid, fid))
 
@@ -66,11 +87,16 @@ class LitterStore:
             msg = "INSERT INTO friends (uid, fid, txtime) VALUES (?, ?, ?)"
             self.__db_call(msg, (uid, fid, txtime))
 
-        elif results[0][0] < txtime:
+        elif results[0][0] != None and results[0][0] < txtime:
             msg = "UPDATE friends SET txtime = ? WHERE uid == ? and fid == ?"
             self.__db_call(msg, (txtime, uid, fid))
 
+
     def __post(self, msg, uid=None, txtime=None, postid=-1, hashid=None):
+
+        logging.debug('POST : %s %s %s %s %s' % 
+            (msg,uid,txtime,postid,hashid))
+
         rxtime = 0
 
         if uid == None:
@@ -80,30 +106,27 @@ class LitterStore:
             self.nextid += 1
             hashid = self.cal_hash(uid, msg, txtime, postid)
 
+        post = (uid, postid, txtime, rxtime, msg, hashid)
+
         if len(msg) > 140:
-            raise Exception("message too long")
+            raise StoreError("message too long")
 
         if postid == -1:
-            raise Exception("Invalid postid: " + str(postid))
+            raise StoreError("Invalid postid: " + str(postid))
 
         if hashid != self.cal_hash(uid, msg, txtime, postid):
-            raise Exception("hashid doesn't match:"
-                " uid: %s msg: %s time: %s postid: %s badhash: %s" \
-                % (uid, msg, txtime, postid, hashid))
+            raise StoreError("hashid mismatch: " + repr(post))
 
-        try:
-            self.__db_call("INSERT INTO posts (uid, postid, txtime, "
-                "rxtime, msg, hashid) VALUES (?, ?, ?, ?, ?, ?)", 
-                (uid, postid, txtime, rxtime, msg, hashid))
-        except sqlite3.IntegrityError as ie:
-            raise StoreError(str(ie))    
+        self.__db_call("INSERT INTO posts (uid, postid, txtime, "
+            "rxtime, msg, hashid) VALUES (?, ?, ?, ?, ?, ?)", post)
 
         self.__update_time(self.uid, uid, txtime)
 
-        return [(uid, postid, txtime, msg, hashid)]
+        return post
 
-    def __get(self, uid = None, begin = 0, until = sys.maxint, limit = 10):
-        pref = "SELECT uid, postid, txtime, msg, hashid FROM posts WHERE "
+
+    def __get(self, uid=None, begin=0, until=sys.maxint, limit=10):
+        pref = "SELECT msg, uid, txtime, postid, hashid FROM posts WHERE "
         msg = ()
 
         if uid == None:
@@ -115,12 +138,6 @@ class LitterStore:
 
         return self.__db_call(msg[0], msg[1])
 
-    def __gen_pull(self):
-        request = { 'm' : 'pull'}
-        msg = "SELECT fid, txtime FROM friends WHERE uid == ?"
-        request['friends'] = []
-        request['friends'].extend(self.__db_call(msg, (self.uid,)))
-        return request
 
     def __pull(self, uid, friends=None):
         results = []
@@ -135,6 +152,7 @@ class LitterStore:
                 results.extend(self.__get(fid, txtime))
 
         return results
+
 
     # Code adapted from Ben Englard implemetation
     def __find_gaps_by_uid(self, uid):
@@ -162,6 +180,7 @@ class LitterStore:
 
         return gaps
 
+
     def __find_all_gaps(self):
         msg = "SELECT DISTINCT fid FROM friends WHERE uid ==?"
         fids = self.__db_call(msg, (self.uid,))
@@ -176,17 +195,8 @@ class LitterStore:
 
         return results;
 
-    def __gen_gap(self):
-        request = []
-        gap_list = self.__find_all_gaps()
 
-        # only return dictionary if gaps are found
-        if len(gap_list) > 0:
-            request = {'m': 'gap', 'friends': gap_list}
-
-        return request
-
-    def __gap(self, uid, friends = None):
+    def __gap(self, uid, friends=None):
         results = []
         self.__update_time(self.uid, uid, 0)
 
@@ -198,211 +208,126 @@ class LitterStore:
 
         return results
 
-    def __set_dest_header(self, request):
+
+    def __gen_push(self):
         pass
 
-    def __process_results(self, request, response):
-        results = []
-        fid = request.get('from', 'any')
-        ttl = request.get('ttl', 4)
-        m_type = request.get('type', 'req')
 
-        if m_type == 'req':
-            m_id = random.random()
-            m_type = 'rep'
-        else:
-            m_id = request.get('id', None)
+    def __gen_pull(self):
+        request = { 'm' : 'pull', 'uid': self.uid}
+        msg = "SELECT fid, txtime FROM friends WHERE uid == ?"
+        request['friends'] = []
+        request['friends'].extend(self.__db_call(msg, (self.uid,)))
+        return request
 
-        if isinstance(response, list):
-            for post in response:
-                kwargs = {}
-                kwargs['uid'] = post[0]
-                kwargs['postid'] = post[1]
-                kwargs['txtime'] = post[2]
-                kwargs['msg'] = post[3]
-                kwargs['hashid'] = post[4]
-                kwargs['m'] = 'post'
-                kwargs['to'] = fid
-                kwargs['from'] = self.uid
-                kwargs['ttl'] = ttl
-                kwargs['id'] = m_id
-                kwargs['type'] = m_type
-                results.append(kwargs)
-        elif isinstance(response, dict):
-            response['from'] = self.uid
-            response['to'] = fid
-            response['ttl'] = ttl
-            response['id'] = m_id
-            response['type'] = m_type
-            results.append(response)
 
-        return results
+    def __gen_gap(self):
+        request = []
+        gap_list = self.__find_all_gaps()
+
+        # only return dictionary if gaps are found
+        if len(gap_list) > 0:
+            request = {'m': 'gap', 'friends': gap_list}
+
+        return request
+
+
+    def __get_headers(self, request, meth=None):
+
+        logging.debug('GETHEADERS : %s %s' % (request,meth))
+
+        headers = None
+
+        if meth == 'gen_push' or meth == 'gen_pull' or meth == 'gen_gap':
+            headers = {}
+            headers['hto'] = request.get('hto','all')
+            headers['hfrom'] = self.uid
+            headers['hid'] = random.random()
+            headers['htype'] = 'req'
+            headers['httl'] = request.get('httl', 2)
+        elif meth == 'push' or meth == 'pull' or meth == 'gap':
+            headers = {}
+            headers['hto'] = request.get('hfrom', 'any')
+            headers['hfrom'] = self.uid
+            headers['hid'] = request.get('hid', None)
+            headers['httl'] = 4
+            headers['htype'] = 'rep'
+
+        return headers
+
 
     def process(self, request):
-        results = []
+
+        logging.debug('PROCESS : %s' % (request,))
+
+        result = {}
         meth = request.get('m', None)
+        headers = request.get('headers', {})
 
-        if meth == 'post':
-            kwargs = {}
-            kwargs['msg'] = request.get('msg')
-            kwargs['uid'] = request.get('uid', None)
-            kwargs['txtime'] = request.get('txtime', None)
-            kwargs['postid'] = request.get('postid', -1)
-            kwargs['hashid'] = request.get('hashid', None)
-            results = self.__post(**kwargs)
-        elif meth == 'get':
-            kwargs = {}
-            kwargs['uid'] = request.get('uid', None)
-            kwargs['begin'] = request.get('begin', 0)
-            kwargs['until'] = request.get('until', sys.maxint)
-            kwargs['limit'] = request.get('limit', 10)
-            results = self.__get(**kwargs)
+        if 'posts' in request:
+            for post in request['posts']:
+                self.__post(*post)
+
+        if 'query' in request:
+            meth = request['query']['m']
+
+        if meth == 'gen_push':
+            result['posts'] = self.__get(self.uid)
         elif meth == 'gen_pull':
-            results = self.__gen_pull()
+            result['query'] = self.__gen_pull()
         elif meth == 'pull':
-            kwargs = {}
-            kwargs['uid'] = request.get('uid')
-            kwargs['friends'] = request.get('friends', None)
-            results = self.__pull(**kwargs)
+            uid = request['query']['uid']
+            friends = request['query']['friends']
+            result['posts'] = self.__pull(uid, friends)
         elif meth == 'gen_gap':
-            results = self.__gen_gap()
+            result['query'] = self.__gen_pull()
         elif meth == 'gap':
-            kwargs = {}
-            kwargs['uid'] = request.get('uid')
-            kwargs['friends'] = request.get('friends', None)
-            results = self.__gap(**kwargs)
+            uid = request['query']['uid']
+            friends = request['query']['friends']
+            result['posts'] = self.__gap(uid, friends)
 
-        return self.__process_results(request, results)
+        result['headers'] = self.__get_headers(headers, meth)
+        return result
+
 
     def close(self):
         self.con.close()
 
 
-class LitterUnitSingle(unittest.TestCase):
-    """Unit test for litter store in single user case"""
-
-    def setUp(self):
-        self.litter = LitterStore("Test", test = True)
-
-    def tearDown(self):
-        self.litter.close()
-        self.litter = None
-
-    def test_posts(self):
-        msg = 'this is a test'
-
-        request = {'m': 'post', 'msg' : msg, 'ttl' : 1 }
-        results = self.litter.process(request)
-        self.assertEqual(results[0]['msg'], msg)
-
-        request = {'m': 'post', 'msg' : msg , 'ttl' : 1}
-        results = self.litter.process(request)
-        self.assertEqual(results[0]['postid'], 2)
-
-        request = {'m': 'get'}
-        results = self.litter.process(request)
-        self.assertEqual(len(results), 2)
-
-        msg = 'message from luda'
-        txtime = time.time()
-        uid = 'luda'
-        postid = 2
-        hashid = self.litter.cal_hash(uid, msg, txtime, postid)
-        request = {'m' : 'post', 'uid': uid, 'msg' : msg, 'postid' : postid,
-                    'txtime' : txtime, 'hashid' : hashid}
-        results = self.litter.process(request)
-        self.assertEqual(results[0]['uid'], 'luda')
-
-    def test_friends(self):
-        msg = 'message from luda'
-        txtime = time.time()
-        uid = 'luda'
-        postid = 2
-        hashid = self.litter.cal_hash(uid, msg, txtime, postid)
-        request = {'m' : 'post', 'uid': uid, 'msg' : msg, 'postid' : postid,
-                    'txtime' : txtime, 'hashid' : hashid}
-        results = self.litter.process(request)
-        self.assertEqual(results[0]['uid'], 'luda')
-
-        txtime = txtime + 500
-        hashid = self.litter.cal_hash(uid, msg, txtime, postid)
-        request = {'m' : 'post', 'uid': uid, 'msg' : msg, 'postid' : postid,
-                    'txtime' : txtime, 'hashid' : hashid}
-        results = self.litter.process(request)
-        self.assertEqual(results[0]['uid'], 'luda')
-
-        request = { 'm' : 'get_friends'}
-        results = self.litter.process(request)
-        print results
-
-
-class LitterUnitDouble(unittest.TestCase):
+class LitterUnit(unittest.TestCase):
     """Unit test for litter store in double user case"""
 
     def setUp(self):
-        self.litter_a = LitterStore("usera", test = True)
-        self.litter_b = LitterStore("userb", test = True)
+        self.litter_a = LitterStore("usera", test=True)
+        self.litter_b = LitterStore("userb", test=True)
 
     def tearDown(self):
         self.litter_a.close()
         self.litter_b.close()
-        self.litter_a = None
-        self.litter_b = None
 
-    def test_pull(self):
-        request_a = {'m' : 'gen_pull'}
-        results_a = self.litter_a.process(request_a)
+    def test(self):
+        request = {'m':'gen_pull'}
+        result = self.litter_a.process(request)
+        self.assertEqual(result['headers']['hto'], 'all')
+        self.assertEqual(result['headers']['hfrom'], 'usera')
+        self.assertEqual(result['headers']['htype'], 'req')
+        self.assertEqual(result['headers']['httl'], 2)
 
-        request_b = results_a[0]
-        results_b = self.litter_b.process(request_b)
+        request = {'posts':[]}
+        request['posts'].append(('this is my first post',))
+        request['posts'].append(('this is my second post',))
+        result = self.litter_a.process(request)
+        self.assertEqual(result, {'headers':None})
 
-        msg = 'this is a test'
-        request_a = {'m': 'post', 'msg' : msg}
-        results_a = self.litter_a.process(request_a)
-        request_a = {'m': 'post', 'msg' : msg}
-        results_a = self.litter_a.process(request_a)
+        request = {'m':'gen_push'}
+        result = self.litter_a.process(request)
+        self.assertEqual(len(result['posts']),2)
 
-        request_b = {'m': 'gen_pull'}
-        results_b = self.litter_b.process(request_b)
-
-        request_a = results_b[0]
-        results_a = self.litter_a.process(request_a)
-
-        request_b = results_a[0]
-        request_b['ttl'] = 1
-        results_b = self.litter_b.process(request_b)
-
-        self.assertEqual(results_b[0]['msg'], msg)
-
-    def test_gap(self):
-        request_a = {'m' : 'gen_gap'}
-        results_a = self.litter_a.process(request_a)
-        self.assertEqual(len(results_a), 0)
-        self.assertTrue(isinstance(results_a, list))
-
-        msg = 'this is a test'
-        request_a = {'m': 'post', 'msg' : msg}
-        results_a = self.litter_a.process(request_a)
-        request_a = {'m': 'post', 'msg' : msg}
-        results_a = self.litter_a.process(request_a)
-        self.assertEqual(results_a[0]['postid'], 2)
-        self.assertEqual(results_a[0]['msg'], msg)
-
-        request_b = results_a[0]
-        results_b = self.litter_b.process(request_b)
-
-        request_b = {'m': 'gen_gap'}
-        results_b = self.litter_b.process(request_b)
-        self.assertEqual(results_b[0]['m'], 'gap')
-        self.assertEqual(results_b[0]['friends'].keys()[0], 'usera')
-
-        request_a = results_b[0]
-        results_a = self.litter_a.process(request_a)
-        self.assertEqual(results_a[0]['postid'], 1)
-        self.assertEqual(results_a[0]['msg'], msg)
-
+        try:
+            self.litter_a.process(result)
+        except Exception as ex:
+            print ex
 
 
 if __name__ == '__main__':
-    import unittest
     unittest.main()

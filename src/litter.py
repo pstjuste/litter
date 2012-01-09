@@ -23,13 +23,6 @@ logging.basicConfig(level=logging.DEBUG)
 class MulticastServer(threading.Thread):
     """Listens for multicast and put them in queue"""
 
-    def __init__(self, queue, devs):
-        threading.Thread.__init__(self)
-        self.queue = queue
-        self.running = threading.Event()
-        self.intfs = [MulticastServer.get_ip(d) for d in devs]
-        self.sock = MulticastServer.init_mcast(self.intfs)
-
     # from http://code.activestate.com/recipes/439094-get-the-ip-address-
     # associated-with-a-network-inter/
     @staticmethod
@@ -58,7 +51,7 @@ class MulticastServer(threading.Thread):
         if os.name != "nt":
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_TTL, 2)
+        s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_TTL, 1)
         s.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_LOOP, 0)
 
         s.bind(('', port))
@@ -76,14 +69,21 @@ class MulticastServer(threading.Thread):
             socket.inet_aton(addr) + socket.inet_aton(intf))
         s.close()
 
+    def __init__(self, queue, devs):
+        threading.Thread.__init__(self)
+        self.queue = queue
+        self.running = threading.Event()
+        self.intfs = [MulticastServer.get_ip(d) for d in devs]
+        self.sock = MulticastServer.init_mcast(self.intfs)
+
     def run(self):
         """Waits in a loop for incoming packet then puts them in queue"""
 
         self.running.set() #set to true
         while self.running.is_set():
             data, addr = self.sock.recvfrom(1024)
+            logging.debug("MulticastServer: sender %s %s" % (addr, data))
             self.queue.put((data, UDPSender(self.sock, self.intfs, addr)))
-            print "MulticastServer: sender ", repr(addr), data
 
     def stop(self):
         """Set run to false, and send an empty message"""
@@ -130,7 +130,7 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def process_request(self, request):
         """Extract json from request and queues it for processing"""
 
-        print "HTTPHandler: %s " % request
+        logging.debug("HTTPHandler: %s " % request)
         data = request['json'][0]
         queue = Queue.Queue(1)
         sender = HTTPSender(queue, self.client_address)
@@ -227,7 +227,7 @@ class WorkerThread(threading.Thread):
                 break
 
             try:
-                print "REQ: %s : %s" % (sender, data)
+                logging.debug("REQ: %s : %s" % (sender, data))
 
                 if not isinstance(data, dict):
                     data = unicode(data, "utf-8")
@@ -237,12 +237,15 @@ class WorkerThread(threading.Thread):
 
                 # save method locally before sending it litterstore
                 # just in case it gets modified
-                response = self.litstore.process(request)
-                print "REP: %s : %s" % (sender, response)
-                #self.send(response, sender)
+                response = None
+                if self.router.should_process(request, sender):
+                    response = self.litstore.process(request)
+                    logging.debug("REP: %s : %s" % (sender, response))
+                    self.router.send(response, sender)
 
-                # TODO - Temporary testing
-                self.send((request,), sender)
+                if isinstance(sender, HTTPSender):
+                    data = json.dumps(response, ensure_ascii=False)
+                    sender.send(data.encode("utf-8"))
 
             except StoreError as ie:
                 if str(ie) == "column hashid is not unique":
@@ -252,24 +255,11 @@ class WorkerThread(threading.Thread):
                     if isinstance(sender, HTTPSender):
                         sender.send_error(ex)
                     logging.exception(ie)
+
             except Exception as ex:
                 if isinstance(sender, HTTPSender):
                     sender.send_error(ex)
                 logging.exception(ex)
-
-    def send(self, response, sender):
-
-        addr = None if sender == None else sender.dest
-
-        if isinstance(sender, HTTPSender):
-            # also send reply back to HTTP path directly from
-            # thread, since it's put in queue for HTTP thread
-            data = json.dumps(response, ensure_ascii=False)
-            sender.send(data)
-
-        for reply in response:
-            self.router.send(reply, sender, addr)
-            time.sleep(0.01)
 
     def stop(self):
         self.queue.put((None,None))
@@ -281,7 +271,7 @@ def usage():
 
 def main():
 
-    devs = ['lo']
+    devs = []
     name = socket.gethostname()
     port = "8080";
 
@@ -315,23 +305,26 @@ def main():
     httpd = HTTPThread(queue, port=int(port))
     httpd.start()
 
-    # wait a few seconds for threads to setup
-    time.sleep(5)
-
-    pull_req = { 'm' : 'pull', 'type':'req'}
+    pull_req = { 'm' : 'gen_pull'}
     pull_data = json.dumps(pull_req)
 
-    gap_req = { 'm' : 'gap', 'type':'req'}
+    gap_req = { 'm' : 'gen_gap'}
     gap_data = json.dumps(gap_req)
+
+    sender = Sender()
+    sender.dest = (MCAST_ADDR,PORT)
 
     try:
         while True:
-            #queue.put((pull_data, None))
-            #queue.put((gap_data, None))
-            #time.sleep(60000)
-            user_input = raw_input('>>')
-            data = eval(user_input)
-            queue.put((data, None))
+            #queue.put((pull_data, sender))
+            #queue.put((gap_data, sender))
+            #time.sleep(60)
+            user_input = raw_input()
+            try:
+                data = eval(user_input)
+                queue.put((data, sender))
+            except Exception as ex:
+                logging.exception(ex)
     except:
         #Control-C will put us here, let's stop the other threads:
         httpd.stop()
