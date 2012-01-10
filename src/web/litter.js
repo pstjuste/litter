@@ -83,7 +83,13 @@ function messageCount() {
 
 function loadResults(state) {
   for (var i = state.length-1; i >= 0; i--) {
-    addResult(state[i]);
+    var result = {}
+    result['msg'] = state[i][0]
+    result['uid'] = state[i][1]
+    result['txtime'] = state[i][2]
+    result['postid'] = state[i][3]
+    result['hashid'] = state[i][4]
+    addResult(result);
   }
 }
 
@@ -194,7 +200,7 @@ function doPost() {
     alert("Message is longer than 140 characters");
     return;
   }
-  var ob = { "m" : "post", "msg" : msg };
+  var ob = { "posts": [[msg]] };
   $("textarea#txt").val('');
   $.ajax({type: "POST", url: "/api", dataType: 'json', 
           data : {'json' : JSON.stringify(ob)} ,
@@ -202,5 +208,5 @@ function doPost() {
 }
 
 function processState(state) {
-  loadResults(state);
+  loadResults(state['posts']);
 }

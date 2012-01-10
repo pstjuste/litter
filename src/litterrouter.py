@@ -35,7 +35,7 @@ class UDPSender(Sender):
     def dest(self):
         return self.__dest
 
-    def __repr__(self):
+    def __str__(self):
         return "UDP Sender: %s" % (self.dest,)
 
     def send(self, data, dest=None):
@@ -72,7 +72,7 @@ class HTTPSender(Sender):
     def dest(self):
         return self.__dest
 
-    def __repr__(self):
+    def __str__(self):
         return "HTTP Sender: %s" % (self.dest,)
 
     def send(self, data, dest=None):
@@ -211,9 +211,12 @@ class LitterRouter:
         elif isinstance(headers, dict) and headers['htype'] == 'req' and \
             headers['hid'] in self.__mid_to_addr: return False
         elif headers != None:
-            self.send(data, sender)
-            #restore ttl since send decrements it
-            headers['httl'] += 1
+            try:
+                self.send(data, sender)
+                #restore ttl since send decrements it
+                headers['httl'] += 1
+            except RouterError as err:
+                logging.exception(err)
 
         return True
 

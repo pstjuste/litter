@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import json, hashlib, base64, zlib, struct
+import json, hashlib, base64, zlib, struct, unittest
 
 from rsa import *
 
@@ -23,6 +23,7 @@ class JsonCert(object):
       self.pubkey = JsonCert.str_to_key(self.as_dict['key'])
     else:
       raise Exception("No public key in certificate")
+
     if 'sig' in self.as_dict:
       sig = self.as_dict['sig']
       del self.as_dict['sig']
@@ -92,3 +93,36 @@ class JsonCert(object):
     if crcval != crccomp:
       raise Exception("CRC mismatch: computed(%i) != stored(%i)" % (crccomp, crcval))
     return json.loads(str_ob[:-4].decode("utf-8"))
+
+class JsonCertTest(unittest.TestCase):
+
+    def test(self):
+        import pickle, os
+
+        if os.path.exists('key.data'):
+            key = pickle.load(open("key.data","r"))
+            cert = JsonCert({}, key['pub'],key['priv'])
+        else:
+            cert = JsonCert.generate(1024,None)
+            key = { 'pub':cert.pubkey, 'priv':cert.privkey}
+            pickle.dump(key, open('key.data', 'w+'))
+
+        msg = "sign me"
+        signed_msg = cert.sign_object(msg)
+        org_msg = cert.unsign_object(signed_msg)
+        self.assertEqual(msg, org_msg)
+
+        ser_obj = JsonCert.serialize(cert.as_dict)
+        obj = JsonCert.deserialize(ser_obj)
+
+        # need to change from unicode to string
+        kvpairs = { 'key':str(obj['key']),'sig':str(obj['sig'])}
+        new_cert = JsonCert(kvpairs)
+
+        self.assertEqual(cert.pubkey, new_cert.pubkey)
+        self.assertEqual(cert.as_dict['sig'], new_cert.as_dict['sig'])
+
+
+if __name__ == '__main__':
+    unittest.main()
+

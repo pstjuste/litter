@@ -18,7 +18,7 @@ class StoreError(Exception):
         self.msg = msg
 
     def __str__(self):
-        return repr(self.msg)
+        return str(self.msg)
 
 
 class LitterStore:
@@ -266,12 +266,20 @@ class LitterStore:
 
         if 'posts' in request:
             for post in request['posts']:
-                self.__post(*post)
+                try:
+                    self.__post(*post)
+                except StoreError as err:
+                    if str(err) != "column hashid is not unique":
+                        logging.exception(err)
 
         if 'query' in request:
             meth = request['query']['m']
 
-        if meth == 'gen_push':
+        if meth == 'get':
+            begin = request['begin']
+            limit = request['limit']
+            result['posts'] = self.__get(begin=begin,limit=limit)
+        elif meth == 'gen_push':
             result['posts'] = self.__get(self.uid)
         elif meth == 'gen_pull':
             result['query'] = self.__gen_pull()
@@ -307,11 +315,13 @@ class LitterUnit(unittest.TestCase):
 
     def test(self):
         request = {'m':'gen_pull'}
-        result = self.litter_a.process(request)
+        result = self.litter_b.process(request)
         self.assertEqual(result['headers']['hto'], 'all')
-        self.assertEqual(result['headers']['hfrom'], 'usera')
+        self.assertEqual(result['headers']['hfrom'], 'userb')
         self.assertEqual(result['headers']['htype'], 'req')
         self.assertEqual(result['headers']['httl'], 2)
+
+        result = self.litter_a.process(result)
 
         request = {'posts':[]}
         request['posts'].append(('this is my first post',))
@@ -323,10 +333,27 @@ class LitterUnit(unittest.TestCase):
         result = self.litter_a.process(request)
         self.assertEqual(len(result['posts']),2)
 
-        try:
-            self.litter_a.process(result)
-        except Exception as ex:
-            print ex
+        request = {'m':'gen_pull'}
+        result = self.litter_b.process(request)
+        self.assertEqual(result['headers']['hto'], 'all')
+        self.assertEqual(result['headers']['hfrom'], 'userb')
+        self.assertEqual(result['headers']['htype'], 'req')
+        self.assertEqual(result['headers']['httl'], 2)
+
+        result = self.litter_a.process(result)
+        self.assertEqual(result['headers']['hto'], 'userb')
+        self.assertEqual(result['headers']['hfrom'], 'usera')
+        self.assertEqual(result['headers']['htype'], 'rep')
+        self.assertEqual(result['headers']['httl'], 4)
+
+        result = self.litter_b.process(result)
+        self.assertEqual(result, {'headers':None})
+
+        request = {'m':'get','begin':0,'limit':10}
+        result = self.litter_b.process(request)
+        self.assertEqual(result['headers'], None)
+        self.assertEqual(len(result['posts']),2)
+        self.assertEqual(result['posts'][0][1],'usera')
 
 
 if __name__ == '__main__':

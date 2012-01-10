@@ -14,7 +14,7 @@ import BaseHTTPServer
 import logging
 import urllib
 import getopt
-from litterstore import LitterStore, StoreError
+from litterstore import LitterStore
 from litterrouter import *
 
 # Log everything, and send it to stderr.
@@ -246,15 +246,6 @@ class WorkerThread(threading.Thread):
                 if isinstance(sender, HTTPSender):
                     data = json.dumps(response, ensure_ascii=False)
                     sender.send(data.encode("utf-8"))
-
-            except StoreError as ie:
-                if str(ie) == "column hashid is not unique":
-                    #this means we got a duplicate, no need to log:
-                    pass
-                else:
-                    if isinstance(sender, HTTPSender):
-                        sender.send_error(ex)
-                    logging.exception(ie)
 
             except Exception as ex:
                 if isinstance(sender, HTTPSender):
