@@ -103,11 +103,9 @@ class LitterRouter:
         self.__uid_to_addr = {}
         self.__mid_to_addr = {}
 
-
     def __get_bcast_sender(self):
         logging.debug('GET BCAST')
         return UDPSender(self.__sock, self.__intfs)
-
 
     def __get_rand_sender(self):
         sender = None
@@ -122,12 +120,9 @@ class LitterRouter:
             sender = UDPSender(self.__sock, dest=next_hop)
 
         logging.debug('GET RND: %s' % (sender,))
-
         return sender
 
-
     def __get_sender(self, uid=None, mid=None):
-
         sender = None
 
         if mid != None and mid in self.__mid_to_addr:
@@ -143,9 +138,7 @@ class LitterRouter:
 
         return sender
 
-
     def __add_route(self, headers, addr):
-
         logging.debug('ADD ROUTE : %s : %s' % (headers, addr))
 
         if addr != None and not addr[0].startswith('127'):
@@ -162,15 +155,12 @@ class LitterRouter:
         else:
             return False
 
-
     def __should_send(self, hto, hfrom, hid, htype, httl):
         result = httl >= 0 and hto != self.__uid
         if htype == 'req': result = result and hid not in self.__mid_to_addr
         return result
 
-
     def send(self, data, sender=None, addr=None):
-
         logging.debug('SEND : %s %s' % (sender, data))
 
         new_sender = sender
@@ -199,13 +189,10 @@ class LitterRouter:
 
         return new_sender
 
-
     def should_process(self, data, sender=None):
-
         logging.debug('SPROCESS : %s %s' % (sender, data))
 
         headers = data.get('headers', None)
-
         if isinstance(sender, Sender) and sender.dest[0] in self.__intfs: 
             return False
         elif isinstance(headers, dict) and headers['htype'] == 'req' and \

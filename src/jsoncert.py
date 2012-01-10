@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import json, hashlib, base64, zlib, struct, unittest
+import json, hashlib, base64, zlib, struct, pickle, os, unittest
 
 from rsa import *
 
@@ -94,19 +94,23 @@ class JsonCert(object):
       raise Exception("CRC mismatch: computed(%i) != stored(%i)" % (crccomp, crcval))
     return json.loads(str_ob[:-4].decode("utf-8"))
 
+  @staticmethod
+  def getcert():
+    if os.path.exists('key.data'):
+      key = pickle.load(open("key.data","r"))
+      cert = JsonCert({}, key['pub'],key['priv'])
+    else:
+      cert = JsonCert.generate(1024,None)
+      key = { 'pub':cert.pubkey, 'priv':cert.privkey}
+      pickle.dump(key, open('key.data', 'w+'))
+
+    return cert
+
+
 class JsonCertTest(unittest.TestCase):
 
     def test(self):
-        import pickle, os
-
-        if os.path.exists('key.data'):
-            key = pickle.load(open("key.data","r"))
-            cert = JsonCert({}, key['pub'],key['priv'])
-        else:
-            cert = JsonCert.generate(1024,None)
-            key = { 'pub':cert.pubkey, 'priv':cert.privkey}
-            pickle.dump(key, open('key.data', 'w+'))
-
+        cert = JsonCert.getcert()
         msg = "sign me"
         signed_msg = cert.sign_object(msg)
         org_msg = cert.unsign_object(signed_msg)
