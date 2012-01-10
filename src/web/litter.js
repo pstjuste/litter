@@ -200,7 +200,7 @@ function doPost() {
     alert("Message is longer than 140 characters");
     return;
   }
-  var ob = { "posts": [[msg]] };
+  var ob = {"m":"gen_push","posts": [[msg]] };
   $("textarea#txt").val('');
   $.ajax({type: "POST", url: "/api", dataType: 'json', 
           data : {'json' : JSON.stringify(ob)} ,

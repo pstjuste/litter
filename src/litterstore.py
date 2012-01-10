@@ -26,36 +26,47 @@ class LitterStore:
     """Handles storage and processes requests"""
 
     @staticmethod
-    def cal_hash(uid, msg, txtime, postid, cert):
+    def cal_hash(uid, msg, txtime, postid):
         shash = hashlib.sha1()
         tohash = str(uid) + msg + str(txtime) + str(postid)
         #tohash is potentially unicode, if msg is, so we need to convert
         #back to bytes, to do this, we use utf-8:
         tohash = tohash.encode('utf-8')
         shash.update(tohash)
-        return cert.sign_object(shash.hexdigest())['signed']
+        return shash.hexdigest()
+
+    @staticmethod
+    def sign_hash(hash_msg, cert):
+        return cert.sign_object(hash_msg)['signed']
+
+    @staticmethod
+    def unsign_hash(sign_msg, cert, keyid):
+        #json creates unicode which has to be converted to reg strings
+        obj = {'keyid':str(keyid),'signed':str(sign_msg)}
+        return cert.unsign_object(obj)
 
     def __init__(self, uid=None, test=False):
         self.__cert = JsonCert.getcert()
         self.__certs = {}
         self.__certs[self.__cert.keyid64] = self.__cert
-        self.uid = uid if uid != None else socket.gethostname()
-        self.con = sqlite3.connect(":memory:" if test else self.uid + ".db")
-        self.nextid = 1
+        self.__uid = uid if uid != None else socket.gethostname()
+        self.__con = sqlite3.connect(":memory:" if test else self.__uid + ".db")
+        self.__nextid = 1
         self.__init_db()
 
     def __db_call(self, action, params=None):
         logging.debug("dbcall -- %s %s" % (action, params))
 
-        cur = self.con.cursor()
         try:
+            cur = self.__con.cursor()
+
             if params != None:
                 cur.execute(action, params) 
             else:
                 cur.execute(action)
 
             result = cur.fetchall()
-            self.con.commit()
+            self.__con.commit()
             cur.close()
 
         except sqlite3.IntegrityError as ie:
@@ -72,10 +83,10 @@ class LitterStore:
             "(uid TEXT, fid TEXT, txtime NUM, PRIMARY KEY(uid, fid))")
 
         cid = self.__db_call("SELECT MAX(postid) FROM posts WHERE uid == ?",
-            (self.uid, ))
+            (self.__uid, ))
 
         if cid[0][0] != None: 
-            self.nextid = cid[0][0] + 1
+            self.__nextid = cid[0][0] + 1
 
     def __update_time(self, uid, fid, txtime=0):
         msg = "SELECT txtime FROM friends WHERE uid == ? and fid == ?"
@@ -98,11 +109,12 @@ class LitterStore:
         rxtime = 0
 
         if uid == None:
-            uid = self.uid
+            uid = self.__uid
             txtime = time.time()
-            postid = self.nextid
-            self.nextid += 1
-            hashid = self.cal_hash(uid, msg, txtime, postid, self.__cert)
+            postid = self.__nextid
+            self.__nextid += 1
+            hashid = self.sign_hash(self.cal_hash(uid, msg, txtime, postid), 
+                     self.__cert)
             keyid = self.__cert.keyid64
 
         post = (uid, postid, txtime, rxtime, msg, hashid, keyid)
@@ -113,14 +125,14 @@ class LitterStore:
         if postid == -1:
             raise StoreError("Invalid postid: " + str(postid))
 
-        if hashid != self.cal_hash(uid, msg, txtime, postid, 
-            self.__certs[keyid]):
-            raise StoreError("hashid mismatch: " + repr(post))
+        unsigned_hash = self.unsign_hash(hashid, self.__certs[keyid], keyid)
+        if unsigned_hash != self.cal_hash(uid, msg, txtime, postid):
+            raise StoreError("hashid mismatch: " + str(post))
 
         self.__db_call("INSERT INTO posts (uid, postid, txtime, "
             "rxtime, msg, hashid, keyid) VALUES (?, ?, ?, ?, ?, ?, ?)", post)
 
-        self.__update_time(self.uid, uid, txtime)
+        self.__update_time(self.__uid, uid, txtime)
 
         return post
 
@@ -139,11 +151,11 @@ class LitterStore:
 
     def __pull(self, uid, friends=None):
         results = []
-        self.__update_time(self.uid, uid, 0)
+        self.__update_time(self.__uid, uid, 0)
 
         if friends != None and len(friends) == 0:
             # if friends is empty, this is a new node, so reply your posts
-            results = self.__get(self.uid)
+            results = self.__get(self.__uid)
         elif friends != None:
             for fid, txtime in friends:
                 self.__update_time(uid, fid, txtime)
@@ -179,7 +191,7 @@ class LitterStore:
 
     def __find_all_gaps(self):
         msg = "SELECT DISTINCT fid FROM friends WHERE uid ==?"
-        fids = self.__db_call(msg, (self.uid,))
+        fids = self.__db_call(msg, (self.__uid,))
         results = {}
 
         for fid, in fids:
@@ -193,7 +205,7 @@ class LitterStore:
 
     def __gap(self, uid, friends=None):
         results = []
-        self.__update_time(self.uid, uid, 0)
+        self.__update_time(self.__uid, uid, 0)
 
         for fid, gaps in friends.iteritems():
             for start, end in gaps:
@@ -207,10 +219,10 @@ class LitterStore:
         pass
 
     def __gen_pull(self):
-        request = { 'm' : 'pull', 'uid': self.uid}
+        request = { 'm' : 'pull', 'uid': self.__uid}
         msg = "SELECT fid, txtime FROM friends WHERE uid == ?"
         request['friends'] = []
-        request['friends'].extend(self.__db_call(msg, (self.uid,)))
+        request['friends'].extend(self.__db_call(msg, (self.__uid,)))
         return request
 
     def __gen_gap(self):
@@ -232,22 +244,21 @@ class LitterStore:
         if meth == 'gen_push' or meth == 'gen_pull' or meth == 'gen_gap':
             headers = {}
             headers['hto'] = request.get('hto','all')
-            headers['hfrom'] = self.uid
+            headers['hfrom'] = self.__uid
             headers['hid'] = random.random()
             headers['htype'] = 'req'
             headers['httl'] = request.get('httl', 2)
         elif meth == 'push' or meth == 'pull' or meth == 'gap':
             headers = {}
             headers['hto'] = request.get('hfrom', 'any')
-            headers['hfrom'] = self.uid
+            headers['hfrom'] = self.__uid
             headers['hid'] = request.get('hid', None)
             headers['httl'] = 4
             headers['htype'] = 'rep'
 
         return headers
 
-    def __add_cert(self, cert_str):
-        obj = JsonCert.deserialize(cert_str)
+    def __add_cert(self, obj):
         kvpairs = { 'key':str(obj['key']),'sig':str(obj['sig'])}
         new_cert = JsonCert(kvpairs)
         self.__certs[new_cert.keyid64] = new_cert
@@ -260,6 +271,9 @@ class LitterStore:
         meth = request.get('m', None)
         headers = request.get('headers', {})
 
+        if 'cert' in request:
+            self.__add_cert(request['cert'])
+
         if 'posts' in request:
             for post in request['posts']:
                 try:
@@ -267,9 +281,6 @@ class LitterStore:
                 except StoreError as err:
                     if str(err) != "column hashid is not unique":
                         logging.exception(err)
-
-        if 'cert' in request:
-            self.__add_cert(request['cert'])
 
         if 'query' in request:
             meth = request['query']['m']
@@ -279,15 +290,15 @@ class LitterStore:
             limit = request['limit']
             result['posts'] = self.__get(begin=begin,limit=limit)
         elif meth == 'gen_push':
-            result['posts'] = self.__get(self.uid)
-            result['cert'] = JsonCert.serialize(self.__cert.as_dict)
+            result['posts'] = self.__get(self.__uid, limit=1)
+            result['cert'] = self.__cert.as_dict
         elif meth == 'gen_pull':
             result['query'] = self.__gen_pull()
         elif meth == 'pull':
             uid = request['query']['uid']
             friends = request['query']['friends']
             result['posts'] = self.__pull(uid, friends)
-            result['cert'] = JsonCert.serialize(self.__cert.as_dict)
+            result['cert'] = self.__cert.as_dict
         elif meth == 'gen_gap':
             result['query'] = self.__gen_pull()
         elif meth == 'gap':
@@ -299,7 +310,7 @@ class LitterStore:
         return result
 
     def close(self):
-        self.con.close()
+        self.__con.close()
 
 
 class LitterUnit(unittest.TestCase):

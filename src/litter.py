@@ -14,6 +14,7 @@ import BaseHTTPServer
 import logging
 import urllib
 import getopt
+
 from litterstore import LitterStore
 from litterrouter import *
 
@@ -81,7 +82,7 @@ class MulticastServer(threading.Thread):
 
         self.running.set() #set to true
         while self.running.is_set():
-            data, addr = self.sock.recvfrom(1024)
+            data, addr = self.sock.recvfrom(4096)
             logging.debug("MulticastServer: sender %s %s" % (addr, data))
             self.queue.put((data, UDPSender(self.sock, self.intfs, addr)))
 
@@ -176,6 +177,8 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.send_error(404, "Not found")
 
     def send_file(self, path, ctype):
+        """Sends a file"""
+
         try:
             f = open(path)
             data = f.read()
@@ -264,7 +267,8 @@ def main():
 
     devs = []
     name = socket.gethostname()
-    port = "8080";
+    port = "8080"
+    debug_input = False
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], "i:n:p:")
@@ -296,26 +300,25 @@ def main():
     httpd = HTTPThread(queue, port=int(port))
     httpd.start()
 
-    pull_req = { 'm' : 'gen_pull'}
-    pull_data = json.dumps(pull_req)
-
-    gap_req = { 'm' : 'gen_gap'}
-    gap_data = json.dumps(gap_req)
+    pull_data = json.dumps({'m':'gen_pull'})
+    gap_data = json.dumps({'m':'gen_gap'})
 
     sender = Sender()
     sender.dest = (MCAST_ADDR,PORT)
 
     try:
         while True:
-            #queue.put((pull_data, sender))
-            #queue.put((gap_data, sender))
-            #time.sleep(60)
-            user_input = raw_input()
-            try:
-                data = eval(user_input)
-                queue.put((data, sender))
-            except Exception as ex:
-                logging.exception(ex)
+            if debug_input == False:
+                queue.put((pull_data, sender))
+                queue.put((gap_data, sender))
+                time.sleep(60)
+            elif debug_input == True:
+                user_input = raw_input()
+                try:
+                    data = eval(user_input)
+                    queue.put((data, sender))
+                except Exception as ex:
+                    logging.exception(ex)
     except:
         #Control-C will put us here, let's stop the other threads:
         httpd.stop()

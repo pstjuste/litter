@@ -100,7 +100,7 @@ class JsonCert(object):
       key = pickle.load(open("key.data","r"))
       cert = JsonCert({}, key['pub'],key['priv'])
     else:
-      cert = JsonCert.generate(1024,None)
+      cert = JsonCert.generate(1024,{})
       key = { 'pub':cert.pubkey, 'priv':cert.privkey}
       pickle.dump(key, open('key.data', 'w+'))
 
