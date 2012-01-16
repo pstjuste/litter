@@ -10,7 +10,7 @@ import unittest
 import logging
 from jsoncert import JsonCert
 
-logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 
 class StoreError(Exception):
     """Used to raise litterstore error"""
@@ -201,7 +201,7 @@ class LitterStore:
             if len(gaps) > 0:
                 results[fid] = self.__find_gaps_by_uid(fid)
 
-        return results;
+        return results
 
     def __gap(self, uid, friends=None):
         results = []

@@ -6,7 +6,7 @@ import socket
 import random
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 
 MCAST_ADDR = "239.192.1.100"
 PORT = 50000

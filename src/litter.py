@@ -268,7 +268,7 @@ def main():
     devs = []
     name = socket.gethostname()
     port = "8080"
-    debug_input = False
+    debug_input = True
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], "i:n:p:")
