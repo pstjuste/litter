@@ -155,7 +155,14 @@ class LitterRouter:
         else:
             return False
 
-    def __should_send(self, hto, hfrom, hid, htype, httl):
+    def __should_send(self, headers):
+
+        hto = str(headers('hto'))
+        hfrom = str(headers('hfrom'))
+        htype = str(headers('htype'))
+        hid = headers('hid')
+        httl = headers('httl')
+
         result = httl >= 0 and hto != self.__uid
         if htype == 'req': result = result and hid not in self.__mid_to_addr
         return result
