@@ -157,11 +157,11 @@ class LitterRouter:
 
     def __should_send(self, headers):
 
-        hto = str(headers('hto'))
-        hfrom = str(headers('hfrom'))
-        htype = str(headers('htype'))
-        hid = headers('hid')
-        httl = headers('httl')
+        hto = str(headers.get('hto'))
+        hfrom = str(headers.get('hfrom'))
+        htype = str(headers.get('htype'))
+        hid = headers.get('hid')
+        httl = headers.get('httl')
 
         result = httl >= 0 and hto != self.__uid
         if htype == 'req': result = result and hid not in self.__mid_to_addr
@@ -173,7 +173,7 @@ class LitterRouter:
         new_sender = sender
         headers = data.get('headers', None)
 
-        if headers != None and self.__should_send(**headers):
+        if headers != None and self.__should_send(headers):
 
             if headers['hto'] == 'any' and headers['htype'] == 'req':
                 new_sender = self.__get_rand_sender()
