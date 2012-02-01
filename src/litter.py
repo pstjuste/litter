@@ -194,7 +194,7 @@ class HTTPThread(threading.Thread):
     def __init__(self, queue, addr=LOOP_ADDR, port=8080):
         threading.Thread.__init__(self)
         self.port = port
-        self.http = BaseHTTPServer.HTTPServer((IP_ANY, port), HTTPHandler)
+        self.http = BaseHTTPServer.HTTPServer((addr, port), HTTPHandler)
         self.http.queue = queue
         self.running = threading.Event()
 

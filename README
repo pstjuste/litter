@@ -1,6 +1,44 @@
-Litter is for LAN Microblogging.  When combined with a P2P VPN, such as
-http://socialvpn.org , it can be used as a distributed status-sharing
-microblog service.
+Litter - Microblogging for the LAN
+==================================
 
-This does not depend on SocialVPN (but works great with it!).  It does depend
-on multicast support.
+Litter is a microblogging service designed for the local area network. It uses IP multicasting to send updates to other nodes that is reacheable via multicast (typically a LAN, or a multicast-supporting VPN). It listens on one or more network interfaces defined by the user at startup. The service is accessed through a web interface at http://127.0.0.1:8080. It currently runs on Linux and Windows.
+
+
+Instructions
+------------
+
+Download Python for your operating system http://python.org/getit/. Then run the following commands:
+
+    cd litter/src
+
+On Linux, provide the name of the network interface to listen on with the -i option.
+
+    python litter.py -i eth0
+
+On Windows, provide the IP address of the network interface to listen on with the -i option.
+
+    python litter.py -i 192.168.0.100 
+
+Litter also supports multiple interfaces
+
+    python litter.py -i eth0 -i wlan0
+
+You can also specify a user id
+
+    python litter.py -i eth0 -n myid
+
+You can also change the TCP port for the web interface
+
+    python litter.py -i eth0 -n myid -p 8080
+
+Interface
+---------
+To access the web interface, open the browser to http://127.0.0.1:8080
+
+
+License
+-------
+
+Public domain for now.
+
+
