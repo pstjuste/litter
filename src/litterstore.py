@@ -4,7 +4,6 @@ import sqlite3
 import time
 import sys
 import random
-import hashlib
 import socket
 import unittest
 import logging
@@ -25,30 +24,7 @@ class StoreError(Exception):
 class LitterStore:
     """Handles storage and processes requests"""
 
-    @staticmethod
-    def cal_hash(uid, msg, txtime, postid):
-        shash = hashlib.sha1()
-        tohash = str(uid) + msg + str(txtime) + str(postid)
-        #tohash is potentially unicode, if msg is, so we need to convert
-        #back to bytes, to do this, we use utf-8:
-        tohash = tohash.encode('utf-8')
-        shash.update(tohash)
-        return shash.hexdigest()
-
-    @staticmethod
-    def sign_hash(hash_msg, cert):
-        return cert.sign_object(hash_msg)['signed']
-
-    @staticmethod
-    def unsign_hash(sign_msg, cert, keyid):
-        #json creates unicode which has to be converted to reg strings
-        obj = {'keyid':str(keyid),'signed':str(sign_msg)}
-        return cert.unsign_object(obj)
-
     def __init__(self, uid=None, test=False):
-        self.__cert = JsonCert.getcert()
-        self.__certs = {}
-        self.__certs[self.__cert.keyid64] = self.__cert
         self.__uid = uid if uid != None else socket.gethostname()
         self.__con = sqlite3.connect(":memory:" if test else self.__uid + ".db")
         self.__nextid = 1
@@ -77,7 +53,7 @@ class LitterStore:
     def __init_db(self):
         self.__db_call("CREATE TABLE IF NOT EXISTS posts "
             "(uid TEXT, postid INTEGER, msg TEXT, txtime NUM, "
-            "rxtime NUM, hashid TEXT, keyid TEXT, PRIMARY KEY(hashid ASC))")
+            "rxtime NUM, sig TEXT, PRIMARY KEY(sig ASC))")
 
         self.__db_call("CREATE TABLE IF NOT EXISTS friends "
             "(uid TEXT, fid TEXT, txtime NUM, PRIMARY KEY(uid, fid))")
@@ -100,24 +76,22 @@ class LitterStore:
             msg = "UPDATE friends SET txtime = ? WHERE uid == ? and fid == ?"
             self.__db_call(msg, (txtime, uid, fid))
 
-    def __post(self, msg, uid=None, txtime=None, postid=-1, hashid=None, 
-        keyid=None):
+    def __post(self, msg, uid=None, txtime=None, rxtime=None, postid=-1, 
+        sig=None):
 
         logging.debug('POST : %s %s %s %s %s' % 
-            (msg,uid,txtime,postid,hashid))
+            (msg,uid,txtime,postid,sig))
 
-        rxtime = 0
+        rxtime = time.time()
 
         if uid == None:
             uid = self.__uid
-            txtime = time.time()
+            txtime = rxtime
             postid = self.__nextid
             self.__nextid += 1
-            hashid = self.sign_hash(self.cal_hash(uid, msg, txtime, postid), 
-                     self.__cert)
-            keyid = self.__cert.keyid64
+            sig = str(random.random())
 
-        post = (uid, postid, txtime, rxtime, msg, hashid, keyid)
+        post = (uid, postid, txtime, rxtime, msg, sig)
 
         if len(msg) > 140:
             raise StoreError("message too long")
@@ -125,19 +99,15 @@ class LitterStore:
         if postid == -1:
             raise StoreError("Invalid postid: " + str(postid))
 
-        unsigned_hash = self.unsign_hash(hashid, self.__certs[keyid], keyid)
-        if unsigned_hash != self.cal_hash(uid, msg, txtime, postid):
-            raise StoreError("hashid mismatch: " + str(post))
-
         self.__db_call("INSERT INTO posts (uid, postid, txtime, "
-            "rxtime, msg, hashid, keyid) VALUES (?, ?, ?, ?, ?, ?, ?)", post)
+            "rxtime, msg, sig) VALUES (?, ?, ?, ?, ?, ?)", post)
 
         self.__update_time(self.__uid, uid, txtime)
 
         return post
 
     def __get(self, uid=None, begin=0, until=sys.maxint, limit=10):
-        pref = "SELECT msg, uid, txtime, postid, hashid, keyid FROM posts WHERE "
+        pref = "SELECT msg, uid, txtime, rxtime, postid, sig FROM posts WHERE "
         msg = ()
 
         if uid == None:
@@ -258,11 +228,6 @@ class LitterStore:
 
         return headers
 
-    def __add_cert(self, obj):
-        kvpairs = { 'key':str(obj['key']),'sig':str(obj['sig'])}
-        new_cert = JsonCert(kvpairs)
-        self.__certs[new_cert.keyid64] = new_cert
-
     def process(self, request):
 
         logging.debug('PROCESS : %s' % (request,))
@@ -271,34 +236,28 @@ class LitterStore:
         meth = request.get('m', None)
         headers = request.get('headers', {})
 
-        if 'cert' in request:
-            self.__add_cert(request['cert'])
-
         if 'posts' in request:
             for post in request['posts']:
                 try:
                     self.__post(*post)
                 except StoreError as err:
-                    if str(err) != "column hashid is not unique":
+                    if str(err) != "column sig is not unique":
                         logging.exception(err)
 
         if 'query' in request:
             meth = request['query']['m']
 
         if meth == 'get':
-            begin = request['begin']
             limit = request['limit']
-            result['posts'] = self.__get(begin=begin,limit=limit)
+            result['posts'] = self.__get(limit=limit)
         elif meth == 'gen_push':
             result['posts'] = self.__get(self.__uid, limit=1)
-            result['cert'] = self.__cert.as_dict
         elif meth == 'gen_pull':
             result['query'] = self.__gen_pull()
         elif meth == 'pull':
             uid = request['query']['uid']
             friends = request['query']['friends']
             result['posts'] = self.__pull(uid, friends)
-            result['cert'] = self.__cert.as_dict
         elif meth == 'gen_gap':
             result['query'] = self.__gen_pull()
         elif meth == 'gap':
@@ -342,7 +301,7 @@ class LitterUnit(unittest.TestCase):
 
         request = {'m':'gen_push'}
         result = self.litter_a.process(request)
-        self.assertEqual(len(result['posts']),2)
+        self.assertEqual(len(result['posts']),1)
 
         request = {'m':'gen_pull'}
         result = self.litter_b.process(request)
@@ -363,7 +322,7 @@ class LitterUnit(unittest.TestCase):
         request = {'m':'get','begin':0,'limit':10}
         result = self.litter_b.process(request)
         self.assertEqual(result['headers'], None)
-        self.assertEqual(len(result['posts']),2)
+        self.assertEqual(len(result['posts']),1)
         self.assertEqual(result['posts'][0][1],'usera')
 
 

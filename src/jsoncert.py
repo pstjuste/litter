@@ -44,16 +44,6 @@ class JsonCert(object):
         self.as_dict['sig'] = base64.urlsafe_b64encode(sigdata)
     self.keyid64 = base64.urlsafe_b64encode(self.keyid)
       
-  @staticmethod
-  def generate(bits, kvpairs):
-    if 'key' in kvpairs:
-      raise Exception('key already present in certificate attributes')
-    if 'sig' in kvpairs:
-      raise Exception('sig already present in certificate attributes')
-    rng = SecureRandom()
-    (pub, priv) = genkeypair(rng, bits)
-    return JsonCert(kvpairs, pub, priv)
-
   def sign_object(self, obj):
     if not self.privkey:
       raise Exception("Certificate has no private key, cannot sign")
@@ -69,6 +59,16 @@ class JsonCert(object):
     unsigned = rsa_cbc_d(self.pubkey, signed)
     return self.deserialize(unsigned)
  
+  @staticmethod
+  def generate(bits, kvpairs):
+    if 'key' in kvpairs:
+      raise Exception('key already present in certificate attributes')
+    if 'sig' in kvpairs:
+      raise Exception('sig already present in certificate attributes')
+    rng = SecureRandom()
+    (pub, priv) = genkeypair(rng, bits)
+    return JsonCert(kvpairs, pub, priv)
+
   @staticmethod
   def key_to_str(key):
     return "rsa:%s,%s" % (int_to_b64(key[0]),int_to_b64(key[1]))
@@ -105,6 +105,16 @@ class JsonCert(object):
       pickle.dump(key, open('key.data', 'w+'))
 
     return cert
+
+  @staticmethod
+  def cal_hash(uid, msg, txtime, postid):
+    shash = hashlib.sha1()
+    tohash = str(uid) + msg + str(txtime) + str(postid)
+    #tohash is potentially unicode, if msg is, so we need to convert
+    #back to bytes, to do this, we use utf-8:
+    tohash = tohash.encode('utf-8')
+    shash.update(tohash)
+    return shash.hexdigest()
 
 
 class JsonCertTest(unittest.TestCase):

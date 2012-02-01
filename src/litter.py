@@ -29,7 +29,7 @@ class MulticastServer(threading.Thread):
     @staticmethod
     def get_ip(ifname):
         """Retreives the ip address of an interface (Linux only)"""
-        ip = ""
+        ip = ifname
         if os.name != "nt":
             import fcntl
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -38,9 +38,7 @@ class MulticastServer(threading.Thread):
                             0x8915,  # SIOCGIFADDR
                             struct.pack('256s', ifname[:15])
                             )[20:24])
-        else:
-            ip =([ip for ip in socket.gethostbyname_ex(socket.gethostname())[2]
-                  if not ip.startswith("127.")][0]) 
+                            
         return ip
 
     @staticmethod
@@ -126,7 +124,7 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 self.process_file(self.path)
         except Exception as ex:
             self.send_error(400, str(ex))
-            logging.exception(ex);
+            logging.exception(ex)
 
     def process_request(self, request):
         """Extract json from request and queues it for processing"""
@@ -268,7 +266,7 @@ def main():
     devs = []
     name = socket.gethostname()
     port = "8080"
-    debug_input = True
+    debug_input = False
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], "i:n:p:")

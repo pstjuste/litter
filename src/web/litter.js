@@ -20,8 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-var txtime = 0;
-
 $(document).ready(init);
 
 function init() {
@@ -70,15 +68,15 @@ function loadPost() {
 }
 
 function messageCount() {
-    var msg = $(this).val();
-    var count = 140 - msg.length;
-    var elem = $("#countid").html(count + " characters left");
-    if (msg.length > 139) {
-      elem.css({"color" : "#FF0000"});
-    }
-    else {
-      elem.css({"color" : "black"});
-    }
+  var msg = $(this).val();
+  var count = 140 - msg.length;
+  var elem = $("#countid").html(count + " characters left");
+  if (msg.length > 139) {
+    elem.css({"color" : "#FF0000"});
+  }
+  else {
+    elem.css({"color" : "black"});
+  }
 }
 
 function loadResults(state) {
@@ -87,8 +85,9 @@ function loadResults(state) {
     result['msg'] = state[i][0]
     result['uid'] = state[i][1]
     result['txtime'] = state[i][2]
-    result['postid'] = state[i][3]
-    result['hashid'] = state[i][4]
+    result['rxtime'] = state[i][3]
+    result['postid'] = state[i][4]
+    result['hashid'] = state[i][5]
     addResult(result);
   }
 }
@@ -113,9 +112,6 @@ function addResult(result) {
     return;
   }
 
-  if (txtime < result.txtime) {
-    txtime = result.txtime;
-  }
   // time is returned in seconds, needs to be in milliseconds
   var date = new Date(result.txtime * 1000);
 
@@ -189,7 +185,7 @@ function updateUrl(msg) {
 }
 
 function getState() {
-  var ob = { "m" : "get", "begin" : txtime, "limit" : 10 }
+  var ob = { "m" : "get", "limit" : 10 }
   $.ajax({type: "POST", url: "/api", dataType: 'json', 
     data : {'json' : JSON.stringify(ob)}, success: processState});
 }
