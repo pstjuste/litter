@@ -7,17 +7,13 @@ Litter is a microblogging service designed for the local area network. It uses I
 Instructions
 ------------
 
-Download Python for your operating system http://python.org/getit/. Then run the following commands:
+Download Python 2.x for your operating system http://python.org/getit/. Then run the following commands:
 
     cd litter/src
 
 On Linux, provide the name of the network interface to listen on with the -i option.
 
     python litter.py -i eth0
-
-On Windows, provide the IP address of the network interface to listen on with the -i option.
-
-    python litter.py -i 192.168.0.100 
 
 Litter also supports multiple interfaces
 
@@ -30,6 +26,8 @@ You can also specify a user id
 You can also change the TCP port for the web interface
 
     python litter.py -i eth0 -n myid -p 8080
+
+On Windows, after you install the Python, go to the src folder and double-click on litter.py
 
 Interface
 ---------
