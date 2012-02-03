@@ -29,15 +29,13 @@ class MulticastServer(threading.Thread):
     @staticmethod
     def get_ip(ifname):
         """Retreives the ip address of an interface (Linux only)"""
-        ip = ifname
-        if os.name != "nt":
-            import fcntl
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            ip = socket.inet_ntoa(fcntl.ioctl(
-                            s.fileno(),
-                            0x8915,  # SIOCGIFADDR
-                            struct.pack('256s', ifname[:15])
-                            )[20:24])
+        import fcntl
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        ip = socket.inet_ntoa(fcntl.ioctl(
+                              s.fileno(),
+                              0x8915,  # SIOCGIFADDR
+                              struct.pack('256s', ifname[:15])
+                              )[20:24])
                             
         return ip
 
@@ -72,7 +70,14 @@ class MulticastServer(threading.Thread):
         threading.Thread.__init__(self)
         self.queue = queue
         self.running = threading.Event()
-        self.intfs = [MulticastServer.get_ip(d) for d in devs]
+
+        if os.name == 'nt':
+            self.intfs = [ip for ip in socket.gethostbyname_ex(
+                          socket.gethostname())[2] 
+                          if not ip.startswith("127.")]
+        else:
+            self.intfs = [MulticastServer.get_ip(d) for d in devs]
+
         self.sock = MulticastServer.init_mcast(self.intfs)
 
     def run(self):
@@ -81,6 +86,7 @@ class MulticastServer(threading.Thread):
         self.running.set() #set to true
         while self.running.is_set():
             data, addr = self.sock.recvfrom(4096)
+            print "self.sock %s self.intfs %s" % (self.sock, self.intfs)
             logging.debug("MulticastServer: sender %s %s" % (addr, data))
             self.queue.put((data, UDPSender(self.sock, self.intfs, addr)))
 
