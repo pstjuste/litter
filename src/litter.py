@@ -21,6 +21,9 @@ from litterrouter import *
 # Log everything, and send it to stderr.
 logging.basicConfig(level=logging.DEBUG)
 
+extension_mimetypes = {".js":"text/javascript", ".html":"text/html",
+                       ".htm":"text/html", ".css":"text/css", "":"text/plain"}
+
 class MulticastServer(threading.Thread):
     """Listens for multicast and put them in queue"""
 
@@ -155,28 +158,30 @@ class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def process_file(self, path):
         """Handles HTTP file requests"""
 
+        local_path = None
         if path == "/":
-            self.send_file("web/litter.html", "text/html")
-        elif path == "/litter.css":
-            self.send_file("web/litter.css", "text/css")
-        elif path == "/litter.js":
-            self.send_file("web/litter.js", "text/javascript")
-        elif path == "/jquery.js":
-            self.send_file("web/jquery.js", "text/javascript")
-        elif path == "/jquery-ui.js":
-            self.send_file("web/jquery-ui.js", "text/javascript")
-        elif path == "/jquery-ui.css":
-            self.send_file("web/jquery-ui.css", "text/css")
-        elif path == "/json2.js":
-            self.send_file("web/json2.js", "text/javascript")
-        elif path == "/md5.js":
-            self.send_file("web/md5.js", "text/javascript")
+            local_path = "web/litter.html"
         elif path == "/ping":
             #just to have a test method
             self.send_response(200)
             self.send_header("Content-type", "text/plain")
             self.end_headers()
             self.wfile.write("pong")
+            return
+        else:
+            # if we don't have any special handlers, look for the file in the
+            # local web folder
+            local_path = os.path.join("web", os.path.join(*path.split("/")))
+            if not os.path.abspath("web") in os.path.abspath(local_path) or \
+               not os.path.isfile(local_path):
+                # Check to see if the generated local path is invalid, or
+                # attempts to access anything outside of "web/"
+                local_path = None
+
+        if local_path is not None and \
+           os.path.splitext(local_path)[1] in extension_mimetypes:
+            self.send_file(local_path,
+                           extension_mimetypes[os.path.splitext(local_path)[1]])
         else:
             self.send_error(404, "Not found")
 
