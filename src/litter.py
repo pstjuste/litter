@@ -257,7 +257,7 @@ class WorkerThread(threading.Thread):
 
                 if isinstance(sender, HTTPSender):
                     data = json.dumps(response, ensure_ascii=False)
-                    sender.send(data.encode("utf-8"))
+                    sender.send(data)
 
             except Exception as ex:
                 if isinstance(sender, HTTPSender):
