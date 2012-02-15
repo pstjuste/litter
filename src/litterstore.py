@@ -7,6 +7,7 @@ import random
 import socket
 import unittest
 import logging
+import cgi
 from jsoncert import JsonCert
 
 #logging.basicConfig(level=logging.DEBUG)
@@ -117,7 +118,13 @@ class LitterStore:
             msg = pref + ("uid == ? and txtime > ? and txtime < ? "
                 "ORDER BY txtime DESC LIMIT ?"), (uid, begin, until, limit)
 
-        return self.__db_call(msg[0], msg[1])
+        data = self.__db_call(msg[0], msg[1])
+        for i in range(len(data)):
+            d = list(data[i])
+            d[0] = cgi.escape(d[0])
+            d[1] = cgi.escape(d[1])
+            data[i] = tuple(d)
+        return data
 
     def __pull(self, uid, friends=None):
         results = []
