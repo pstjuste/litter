@@ -310,6 +310,7 @@ def main():
     httpd.start()
 
     pull_data = json.dumps({'m':'gen_pull'})
+    rand_pull_data = json.dumps({'m':'gen_rand_pull'})
     gap_data = json.dumps({'m':'gen_gap'})
 
     sender = Sender()
@@ -319,6 +320,7 @@ def main():
         while True:
             if debug_input == False:
                 queue.put((pull_data, sender))
+                queue.put((rand_pull_data, sender))
                 queue.put((gap_data, sender))
                 time.sleep(60)
             elif debug_input == True:

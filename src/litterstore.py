@@ -54,7 +54,7 @@ class LitterStore:
     def __init_db(self):
         self.__db_call("CREATE TABLE IF NOT EXISTS posts "
             "(uid TEXT, postid INTEGER, msg TEXT, txtime NUM, "
-            "rxtime NUM, sig TEXT, PRIMARY KEY(sig ASC))")
+            "rxtime NUM, perms NUM, sig TEXT, PRIMARY KEY(sig ASC))")
 
         self.__db_call("CREATE TABLE IF NOT EXISTS friends "
             "(uid TEXT, fid TEXT, txtime NUM, PRIMARY KEY(uid, fid))")
@@ -78,21 +78,25 @@ class LitterStore:
             self.__db_call(msg, (txtime, uid, fid))
 
     def __post(self, msg, uid=None, txtime=None, rxtime=None, postid=-1, 
-        sig=None):
-
-        logging.debug('POST : %s %s %s %s %s' % 
-            (msg,uid,txtime,postid,sig))
+        perms=None, sig=None):
 
         rxtime = time.time()
+
+        # sets default permission to public
+        if perms == None:
+            perms = 1
 
         if uid == None:
             uid = self.__uid
             txtime = rxtime
             postid = self.__nextid
             self.__nextid += 1
-            sig = str(random.random())
+            sig = JsonCert.cal_hash('%s%s%s%s%s' % 
+                                     (msg, uid, txtime, postid, perms))
 
-        post = (uid, postid, txtime, rxtime, msg, sig)
+        post = (uid, postid, txtime, rxtime, msg, perms, sig)
+
+        logging.debug('POST : %s %s %s %s %s %s %s' % post)
 
         if len(msg) > 140:
             raise StoreError("message too long")
@@ -101,22 +105,25 @@ class LitterStore:
             raise StoreError("Invalid postid: " + str(postid))
 
         self.__db_call("INSERT INTO posts (uid, postid, txtime, "
-            "rxtime, msg, sig) VALUES (?, ?, ?, ?, ?, ?)", post)
+            "rxtime, msg, perms, sig) VALUES (?, ?, ?, ?, ?, ?, ?)", post)
 
         self.__update_time(self.__uid, uid, txtime)
 
         return post
 
-    def __get(self, uid=None, begin=0, until=sys.maxint, limit=10):
-        pref = "SELECT msg, uid, txtime, rxtime, postid, sig FROM posts WHERE "
-        msg = ()
+    def __get(self, uid=None, perms=None, begin=0, until=sys.maxint, limit=10):
 
-        if uid == None:
+        msg = None
+        pref = "SELECT msg, uid, txtime, rxtime, postid, perms, sig \
+                FROM posts WHERE "
+
+        if uid == None or uid == self.__uid:
             msg = pref + ("txtime > ? and txtime < ? ORDER BY "
                 "txtime DESC LIMIT ?"), (begin, until, limit)
         else:
-            msg = pref + ("uid == ? and txtime > ? and txtime < ? "
-                "ORDER BY txtime DESC LIMIT ?"), (uid, begin, until, limit)
+            msg = pref + ("uid == ? and perms == ? and txtime > ? and "
+                "txtime < ? ORDER BY txtime DESC LIMIT ?"), \
+                (uid, perms, begin, until, limit)
 
         data = self.__db_call(msg[0], msg[1])
         for i in range(len(data)):
@@ -132,11 +139,11 @@ class LitterStore:
 
         if friends != None and len(friends) == 0:
             # if friends is empty, this is a new node, so reply your posts
-            results = self.__get(self.__uid)
+            results = self.__get(uid=self.__uid, perms=1)
         elif friends != None:
             for fid, txtime in friends:
                 self.__update_time(uid, fid, txtime)
-                results.extend(self.__get(fid, txtime))
+                results.extend(self.__get(uid=fid, perms=1, begin=txtime))
 
         return results
 
@@ -232,6 +239,14 @@ class LitterStore:
             headers['hid'] = request.get('hid', None)
             headers['httl'] = 4
             headers['htype'] = 'rep'
+        elif meth == 'gen_rand_push' or meth == 'gen_rand_pull':
+            headers = {}
+            headers['hto'] = request.get('hto','any')
+            headers['hfrom'] = self.__uid
+            headers['hid'] = random.random()
+            headers['htype'] = 'req'
+            headers['httl'] = request.get('httl', 5) #should be higher
+
 
         return headers
 
@@ -246,7 +261,12 @@ class LitterStore:
         if 'posts' in request:
             for post in request['posts']:
                 try:
-                    self.__post(*post)
+                    if isinstance(post, dict):
+                        #self.post__(msg=post['msg'],perms=post['perms'])
+                        self.__post(**post)
+                    elif isinstance(post, list):
+                        self.__post(*post)
+
                 except StoreError as err:
                     if str(err) != "column sig is not unique":
                         logging.exception(err)
@@ -257,9 +277,9 @@ class LitterStore:
         if meth == 'get':
             limit = request['limit']
             result['posts'] = self.__get(limit=limit)
-        elif meth == 'gen_push':
+        elif meth == 'gen_push' or meth == 'gen_rand_push':
             result['posts'] = self.__get(self.__uid, limit=1)
-        elif meth == 'gen_pull':
+        elif meth == 'gen_pull' or meth == 'gen_rand_push':
             result['query'] = self.__gen_pull()
         elif meth == 'pull':
             uid = request['query']['uid']

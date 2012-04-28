@@ -55,8 +55,11 @@ function loadPost() {
   q.css({"color" : "gray", "text-align" : "left"});
   var tarea = $("<textarea/>", {"name" : "post", "cols" : "100", "rows" : "3", 
       id : "txt"}).appendTo("#postdiv");
-  var msg = "Post";
-  var bpost = $("<button/>", {text : msg, click : doPost}
+  $("<button/>", {text : "Everyone", click : doEverybodyPost}
+      ).appendTo("#postdiv");
+  $("<button/>", {text : "2-hop Friends", click : doFriendPost}
+      ).appendTo("#postdiv");
+  $("<button/>", {text : "1-hop Friends", click : doFriendPost}
       ).appendTo("#postdiv");
   var par = $("<p/>", { id : "countid", text : '140 characters left'}
       ).appendTo("#postdiv");
@@ -87,7 +90,8 @@ function loadResults(state) {
     result['txtime'] = state[i][2]
     result['rxtime'] = state[i][3]
     result['postid'] = state[i][4]
-    result['hashid'] = state[i][5]
+    result['perms'] = state[i][5]
+    result['hashid'] = state[i][6]
     addResult(result);
   }
 }
@@ -190,17 +194,25 @@ function getState() {
     data : {'json' : JSON.stringify(ob)}, success: processState});
 }
 
-function doPost() {
+function doPost(perms) {
   var msg = $("textarea#txt").val();
   if (msg.length > 140) {
     alert("Message is longer than 140 characters");
     return;
   }
-  var ob = {"m":"gen_push","posts": [[msg]] };
+  var ob = {"m":"gen_push","posts": [ { 'msg':msg,'perms':perms}] };
   $("textarea#txt").val('');
   $.ajax({type: "POST", url: "/api", dataType: 'json', 
           data : {'json' : JSON.stringify(ob)} ,
           success: getState});
+}
+
+function doFriendPost() {
+  doPost(1);
+}
+
+function doEverybodyPost() {
+  doPost(2);
 }
 
 function processState(state) {

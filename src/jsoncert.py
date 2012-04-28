@@ -107,9 +107,9 @@ class JsonCert(object):
     return cert
 
   @staticmethod
-  def cal_hash(uid, msg, txtime, postid):
+  def cal_hash(data):
     shash = hashlib.sha1()
-    tohash = str(uid) + msg + str(txtime) + str(postid)
+    tohash = str(data)
     #tohash is potentially unicode, if msg is, so we need to convert
     #back to bytes, to do this, we use utf-8:
     tohash = tohash.encode('utf-8')
