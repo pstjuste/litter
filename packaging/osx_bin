@@ -1,0 +1,15 @@
+#!/bin/bash
+# When py2app builds a .app bundle, there's no good way to get it to open a
+# terminal window. This acts as a shim that gets put in place of the actual
+# executable, and then launches the base executable through a terminal window
+# opened with AppleScript. Finally a decent use for AppleScript!
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+osascript -e 'tell application "Terminal"
+    activate
+    tell window 1
+        do script "'"cd '$DIR';./base_exec"'"
+        repeat while busy
+            delay 1
+        end repeat
+    end tell
+end tell'
