@@ -56,9 +56,20 @@ class MulticastServer(threading.Thread):
 
         s.bind(('', port))
 
-        for intf in intfs:
+        if len(intfs) > 0:
+            for intf in intfs:
+                s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP,
+                    socket.inet_aton(addr) + socket.inet_aton(intf))
+        else:
+            # let the OS choose default interface for mcast
             s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP,
-                socket.inet_aton(addr) + socket.inet_aton(intf))
+                socket.inet_aton(addr) + socket.inet_aton('0.0.0.0'))
+            # hack for socialvpn
+            try:
+                s.setsockopt(socket.SOL_IP, socket.IP_ADD_MEMBERSHIP,
+                    socket.inet_aton(addr) + socket.inet_aton('172.31.0.2'))
+            except Exception as ex:
+                logging.exception(ex)
 
         return s
 
@@ -295,6 +306,8 @@ def main():
         else:
             usage()
             sys.exit()
+
+    name = raw_input("Please enter a user name: ")
 
     queue = Queue.Queue(100)
 

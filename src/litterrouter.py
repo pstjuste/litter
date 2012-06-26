@@ -45,10 +45,21 @@ class UDPSender(Sender):
         if dest == None and self.__dest == None and self.__intfs != None:
             dest = (MCAST_ADDR, PORT)
 
-            for intf in self.__intfs:
-                self.__sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF,
-                                       socket.inet_aton(intf))
+            if len(self.__intfs) > 0:
+                for intf in self.__intfs:
+                    self.__sock.setsockopt(socket.SOL_IP, 
+                        socket.IP_MULTICAST_IF, socket.inet_aton(intf))
+                    self.__sock.sendto(data, dest)
+            else:
+                # let OS determine default interface
                 self.__sock.sendto(data, dest)
+                # hack for socialvpn
+                try:
+                    self.__sock.setsockopt(socket.SOL_IP, 
+                        socket.IP_MULTICAST_IF, socket.inet_aton('172.31.0.2'))
+                    self.__sock.sendto(data, dest)
+                except Exception as ex:
+                    logging.exception(ex)
 
         elif dest == None and self.__dest != None:
             dest = self.__dest
