@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+(function() {// document closure wrapper
+
 $(document).ready(init);
 
 function init() {
@@ -43,7 +45,8 @@ function loadPage() {
 }
 
 function loadHeader() {
-  $("<h1/>", {text : 'Litter - Microblog for the LAN'}).appendTo("#subheader");
+  $("<h1/>", {text : 'Litter: Microblogging for the LAN'})
+      .appendTo("#subheader");
   var menu = $("<ul/>").appendTo("#subheader");
   menu.append($("<li/>", {text : 'Refresh', click : getState}));
 }
@@ -52,20 +55,18 @@ function doNothing() {}
 
 function loadPost() {
   var q = $("<h1/>", {text : "What's new?"}).appendTo("#postdiv");
-  q.css({"color" : "gray", "text-align" : "left"});
   var tarea = $("<textarea/>", {"name" : "post", "cols" : "100", "rows" : "3", 
-      id : "txt"}).appendTo("#postdiv");
-  $("<button/>", {text : "Everyone", click : doEverybodyPost}
+      id : "txt", autofocus : true, placeholder : "Your message goes here."}
       ).appendTo("#postdiv");
-  $("<button/>", {text : "2-hop Friends", click : doFriendPost}
+  $("<button/>", {id: "everyonebutton", text : "Everyone",
+                  click : doEverybodyPost}
       ).appendTo("#postdiv");
-  $("<button/>", {text : "1-hop Friends", click : doFriendPost}
+  $("<button/>", {text : "Friends of Friends", click : doFriendPost}
+      ).appendTo("#postdiv");
+  $("<button/>", {text : "Friends", click : doFriendPost}
       ).appendTo("#postdiv");
   var par = $("<p/>", { id : "countid", text : '140 characters left'}
       ).appendTo("#postdiv");
-  par.css({"color" : "black", "text-align" : "right", "width" : "600px"});
-  par.css({"font-size" : "20px"});
-	
   tarea.keypress(messageCount);
   tarea.mouseup(messageCount);
 }
@@ -78,11 +79,11 @@ function messageCount() {
     elem.css({"color" : "#FF0000"});
   }
   else {
-    elem.css({"color" : "black"});
+    elem.css({"color" : null});
   }
 }
 
-function loadResults(state) {
+function loadResults(state, initialPopulation) {
   for (var i = state.length-1; i >= 0; i--) {
     var result = {}
     result['msg'] = state[i][0]
@@ -92,7 +93,7 @@ function loadResults(state) {
     result['postid'] = state[i][4]
     result['perms'] = state[i][5]
     result['hashid'] = state[i][6]
-    addResult(result);
+    addResult(result, initialPopulation);
   }
 }
 
@@ -110,7 +111,7 @@ function createTable() {
   ratingcol.appendTo(row);
 }
 
-function addResult(result) {
+function addResult(result, initialPopulation) {
   // we check to see if we already have this in our table
   if ($("body").data(result.hashid) != null) {
     return;
@@ -119,7 +120,8 @@ function addResult(result) {
   // time is returned in seconds, needs to be in milliseconds
   var date = new Date(result.txtime * 1000);
 
-  var row = $("<tr/>");
+  var row = $("<tr/>", {id: "post" + result.hashid,
+                        style: initialPopulation ? "" : "display: none;"});
   $("#firstrow").after(row);
   var imgcol = $("<td/>", { 'valign' : 'top'});
   var infocol = $("<td/>", { 'width': '100%'});
@@ -146,6 +148,9 @@ function addResult(result) {
   // this is a patch so that we don't have duplicate messages in browser
   // but this may cause memory leak, not too sure at the moment
   $("body").data(result.hashid, result);
+  if (!initialPopulation) {
+    $("#post" + result.hashid).fadeIn("slow");
+  }
 }
 
 function updateUrl(msg) {
@@ -215,6 +220,9 @@ function doEverybodyPost() {
   doPost(2);
 }
 
+initialPopulation = true;
 function processState(state) {
-  loadResults(state['posts']);
+  loadResults(state['posts'], initialPopulation);
+  initialPopulation = false;
 }
+})();

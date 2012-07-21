@@ -3,11 +3,15 @@ body {
   font-size: 12px;
   margin: 0px;
   padding: 0px;
+  background-color: #EEEEEE;
 }
 
 #header {
   width: 100%;
   background-color: #3B5998;
+  box-shadow: 0 -70px 70px 70px rgba(0, 0, 0, .7);
+  text-shadow: 0 -1px 0px rgba(0, 0, 0, .7);
+  border-bottom: 1px solid #EEEEEE;
 }
 
 #subheader {
@@ -111,21 +115,91 @@ body {
   text-align: center;
 }
 
+#postdiv h1 {
+  color: #777777;
+  font-size: 24px;
+  text-align: left;
+  margin-top: 20px;
+  margin-bottom: 0px;
+}
+
 #postdiv textarea {
   margin: 10px 0px 0px 0px;
   padding: 5px;
   border: 1px solid #CCCCCC;
   width: 670px;
-  font-size: 16px;
+  font-size: 15px;
   height: 55px;
+  background-color: white;
+  color: #444444;
+  font-family: sans;
+  border-radius: 4px;
+  -moz-transition-property: box-shadow, border;
+  -moz-transition-duration: .4s, .4s;
+  -webkit-transition-property: box-shadow, border;
+  -webkit-transition-duration: .4s, .4s;
+  transition-property: box-shadow, border;
+  transition-duration: .4s, .4s;
+}
+
+#postdiv textarea::-webkit-input-placeholder {
+  color: #CCCCCC;
+}
+
+#postdiv textarea:-moz-placeholder {
+  color: #CCCCCC;
+}
+
+#postdiv textarea:focus {
+  box-shadow: 0px 0px 15px 0px rgba(0, 0, 0, .25);
+  border: 1px solid #999999;
 }
 
 #postdiv button {
   padding: 5px;
-  margin: 5px;
-  height: 45px;
-  width: 80px;
+  margin: 15px;
+  width: 130px;
+  font-size: 13px;
   float: right;
+  color: white;
+  background-color: #AAAAAA;
+  border: none;
+  border-radius: 3px;
+  text-shadow: 0px -1px 0px rgba(0, 0, 0, .2),
+               0px 2px 3px rgba(255, 255, 255, .3);
+  box-shadow: 0px 0px 10px 0px rgba(0, 0, 0, .3),
+              -5px -5px 10px 0px rgba(0, 0, 0, .1) inset,
+              5px 5px 10px 0px rgba(255, 255, 255, .1) inset,
+              -1px -1px 0px 0px rgba(0, 0, 0, .1) inset;
+  -moz-transition-property: background, box-shadow;
+  -moz-transition-duration: .25s, .25s;
+  -webkit-transition-property: background, box-shadow;
+  -webkit-transition-duration: .25s, .25s;
+  transition-property: background, box-shadow;
+  transition-duration: .25s, .25s;
+}
+
+#postdiv button:hover {
+  background-color: #A0A0A0;
+  box-shadow: 0px 0px 10px 0px rgba(0, 0, 0, .4),
+              -5px -5px 10px 0px rgba(0, 0, 0, .15) inset,
+              5px 5px 10px 0px rgba(255, 255, 255, .15) inset;
+}
+
+#postdiv button#everyonebutton {
+  background-color: #5A87E6;
+}
+
+#postdiv button#everyonebutton:hover {
+  background-color: #5077CC;
+}
+
+#countid {
+  color: rgba(0, 0, 0, .3); /* color gets changed when we run out of chars */
+  text-align: left;
+  width: 600px;
+  font-size: 20px;
+  margin-left: 10px;
 }
 
 .rating {
