@@ -194,7 +194,7 @@ class LitterStore:
         for fid, gaps in friends.iteritems():
             for start, end in gaps:
                 self.__update_time(uid, fid, end)
-                posts = self.__get(fid, start, end)
+                posts = self.__get(uid=fid, begin=start, until=end)
                 results.extend(posts)
 
         return results
