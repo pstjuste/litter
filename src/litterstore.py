@@ -286,7 +286,7 @@ class LitterStore:
             friends = request['query']['friends']
             result['posts'] = self.__pull(uid, friends)
         elif meth == 'gen_gap':
-            result['query'] = self.__gen_pull()
+            result['query'] = self.__gen_gap()
         elif meth == 'gap':
             uid = request['query']['uid']
             friends = request['query']['friends']
