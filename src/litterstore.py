@@ -279,7 +279,7 @@ class LitterStore:
             result['posts'] = self.__get(limit=limit)
         elif meth == 'gen_push' or meth == 'gen_rand_push':
             result['posts'] = self.__get(self.__uid, limit=1)
-        elif meth == 'gen_pull' or meth == 'gen_rand_push':
+        elif meth == 'gen_pull' or meth == 'gen_rand_pull':
             result['query'] = self.__gen_pull()
         elif meth == 'pull':
             uid = request['query']['uid']
