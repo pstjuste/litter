@@ -7,10 +7,6 @@ Litter is a microblogging service designed for the local area network. It uses I
 Instructions
 ------------
 
-Download Python 2.x for your operating system (http://python.org/getit/), and then download Litter (https://github.com/ptony82/litter/downloads).
-
-    unzip litter_x.y
-    cd litter_x.y
 
 On Linux, provide the name of the network interface to listen on with the -i option.
 
